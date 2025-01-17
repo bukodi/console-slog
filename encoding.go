@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -189,13 +190,8 @@ func (e *encoder) writeSource(buf *buffer, pc uintptr, cwd string) {
 		return
 	}
 
-	if cwd != "" {
-		if ff, err := filepath.Rel(cwd, src.File); err == nil {
-			src.File = ff
-		}
-	}
 	e.withColor(buf, e.h.opts.Theme.Source(), func() {
-		buf.AppendString(src.File)
+		buf.AppendString(trimmedPath(src.File, cwd))
 		buf.AppendByte(':')
 		buf.AppendInt(int64(src.Line))
 		buf.AppendByte(' ')
@@ -388,4 +384,41 @@ func (e *encoder) writeLevel(buf *buffer, l slog.Level) {
 		e.writeColoredString(buf, str, style)
 	}
 	buf.AppendByte(' ')
+}
+
+func trimmedPath(path string, cwd string) string {
+	// if the file path appears to be under the current
+	// working directory, then we're probably running
+	// in a dev environment, and we can show the
+	// path of the source file relative to the
+	// working directory
+	if cwd != "" && strings.HasPrefix(path, cwd) {
+		if ff, err := filepath.Rel(cwd, path); err == nil {
+			return ff
+		}
+	}
+
+	// Otherwise, show the filename and one
+	// path above it, which is typically going to
+	// be the package name
+	// Note that the go compiler always uses forward
+	// slashes, even if the compiler was run on Windows.
+	//
+	// See https://github.com/golang/go/issues/3335
+	// and https://github.com/golang/go/issues/18151
+
+	// This is equivalent to filepath.Base(path)
+	idx := strings.LastIndexByte(path, '/')
+	if idx == -1 {
+		return path
+	}
+
+	// And this walks back one more separater, which is
+	// equivalent to filepath.Join(filepath.Base(filepath.Dir(path)), filepath.Base(path))
+	idx = strings.LastIndexByte(path[:idx], '/')
+	if idx == -1 {
+		return path
+	}
+
+	return path[idx+1:]
 }

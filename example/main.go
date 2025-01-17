@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/phsym/console-slog"
+	"github.com/ansel1/console-slog"
 )
 
 func main() {
