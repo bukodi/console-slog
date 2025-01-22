@@ -25,6 +25,16 @@ func (b *buffer) Len() int {
 	return len(*b)
 }
 
+func (b *buffer) Truncate(n int) {
+	*b = (*b)[:n]
+}
+
+func (b *buffer) Pad(n int, c byte) {
+	for ; n > 0; n-- {
+		b.AppendByte(byte(c))
+	}
+}
+
 func (b *buffer) Cap() int {
 	return cap(*b)
 }

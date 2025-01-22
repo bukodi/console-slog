@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -45,6 +46,8 @@ type HandlerOptions struct {
 	// ReplaceAttr is called to rewrite each non-group attribute before it is logged.
 	// See [slog.HandlerOptions]
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
+
+	HeaderWidth int
 }
 
 type Handler struct {
@@ -98,14 +101,18 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 	enc.writeTimestamp(headerBuf, rec.Time)
 	enc.writeLevel(headerBuf, rec.Level)
 
-	headerLen := headerBuf.Len()
-	if h.opts.AddSource {
-		enc.writeSource(headerBuf, rec.PC, cwd)
-	}
-
 	enc.writeMessage(middleBuf, rec.Level, rec.Message)
 
 	middleBuf.copy(&h.context)
+
+	if h.opts.AddSource && rec.PC > 0 {
+		src := slog.Source{}
+		frame, _ := runtime.CallersFrames([]uintptr{rec.PC}).Next()
+		src.Function = frame.Function
+		src.File = frame.File
+		src.Line = frame.Line
+		rec.AddAttrs(slog.Any(slog.SourceKey, &src))
+	}
 
 	headers := h.headers
 	localHeaders := false
@@ -178,9 +185,22 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 		return true
 	})
 
-	// add additional headers after the source
-	if len(headers) > 0 {
-		enc.writeHeaders(headerBuf, headers)
+	headerLen := headerBuf.Len()
+
+	if h.opts.HeaderWidth > 0 {
+		for _, a := range headers {
+			enc.writeHeader(headerBuf, a, h.opts.HeaderWidth)
+		}
+	} else {
+		// not using a fixed width header.  Just write the entire source
+		// and headers to the buf sequentially.
+		// if h.opts.AddSource {
+		// 	enc.writeSource(headerBuf, rec.PC, cwd)
+		// }
+
+		if len(headers) > 0 {
+			enc.writeHeaders(headerBuf, headers)
+		}
 	}
 
 	// connect the sections

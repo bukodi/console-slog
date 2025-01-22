@@ -233,6 +233,32 @@ func (e encoder) writeHeaders(buf *buffer, headers []slog.Attr) {
 	}
 }
 
+func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int) int {
+	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
+		a = e.h.opts.ReplaceAttr(nil, a)
+		a.Value = a.Value.Resolve()
+	}
+	if a.Value.Equal(slog.Value{}) {
+		return 0
+	}
+	e.withColor(buf, e.h.opts.Theme.Source(), func() {
+		l := buf.Len()
+		e.writeValue(buf, a.Value)
+		// truncate or pad to required width
+		remainingWidth := l + width - buf.Len()
+		if remainingWidth < 0 {
+			// truncate
+			buf.Truncate(l + width)
+		} else if remainingWidth > 0 {
+			// pad
+			buf.Pad(remainingWidth, ' ')
+		}
+	})
+
+	buf.AppendByte(' ')
+	return buf.Len()
+}
+
 func (e encoder) writeHeaderSeparator(buf *buffer) {
 	e.writeColoredString(buf, "> ", e.h.opts.Theme.AttrKey())
 }
@@ -287,6 +313,46 @@ func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
 	e.writeColoredValue(buf, value, style)
 }
 
+func (e *encoder) writeValue(buf *buffer, value slog.Value) {
+	switch value.Kind() {
+	case slog.KindInt64:
+		buf.AppendInt(value.Int64())
+	case slog.KindBool:
+		buf.AppendBool(value.Bool())
+	case slog.KindFloat64:
+		buf.AppendFloat(value.Float64())
+	case slog.KindTime:
+		buf.AppendTime(value.Time(), e.h.opts.TimeFormat)
+	case slog.KindUint64:
+		buf.AppendUint(value.Uint64())
+	case slog.KindDuration:
+		buf.AppendDuration(value.Duration())
+	case slog.KindAny:
+		switch v := value.Any().(type) {
+		case error:
+			if _, ok := v.(fmt.Formatter); ok {
+				fmt.Fprintf(buf, "%+v", v)
+			} else {
+				buf.AppendString(v.Error())
+			}
+			return
+		case fmt.Stringer:
+			buf.AppendString(v.String())
+			return
+		case *slog.Source:
+			buf.AppendString(trimmedPath(v.File, cwd))
+			buf.AppendByte(':')
+			buf.AppendInt(int64(v.Line))
+			return
+		}
+		fallthrough
+	case slog.KindString:
+		fallthrough
+	default:
+		buf.AppendString(value.String())
+	}
+}
+
 func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod) {
 	switch value.Kind() {
 	case slog.KindInt64:
@@ -314,6 +380,13 @@ func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod
 			return
 		case fmt.Stringer:
 			e.writeColoredString(buf, v.String(), style)
+			return
+		case *slog.Source:
+			e.withColor(buf, style, func() {
+				buf.AppendString(trimmedPath(v.File, cwd))
+				buf.AppendByte(':')
+				buf.AppendInt(int64(v.Line))
+			})
 			return
 		}
 		fallthrough
@@ -397,6 +470,8 @@ func trimmedPath(path string, cwd string) string {
 			return ff
 		}
 	}
+
+	return path
 
 	// Otherwise, show the filename and one
 	// path above it, which is typically going to
