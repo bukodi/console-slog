@@ -686,9 +686,8 @@ func TestHandler_Headers(t *testing.T) {
 			},
 			want: "INF bar baz > with headers group.baz=foo\n",
 		},
-		// {
-		// 	name: "resolver header",
-		// }
+		// todo: add a test for when the record doesn't include the header field, but fixed width headers are enabled
+		// the header should be padded with spaces to the right
 	}
 
 	for _, test := range tests {

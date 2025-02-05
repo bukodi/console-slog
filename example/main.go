@@ -10,7 +10,15 @@ import (
 
 func main() {
 	logger := slog.New(
-		console.NewHandler(os.Stderr, &console.HandlerOptions{Level: slog.LevelDebug, AddSource: true}),
+		console.NewHandler(os.Stderr, &console.HandlerOptions{
+			Level:              slog.LevelDebug,
+			AddSource:          true,
+			Headers:            []string{"logger"},
+			TruncateSourcePath: 2,
+			TimeFormat:         "15:04:05.000",
+			HeaderWidth:        15,
+			Theme: console.NewDimTheme(),
+		}),
 	)
 	slog.SetDefault(logger)
 	slog.Info("Hello world!", "foo", "bar")
@@ -20,7 +28,7 @@ func main() {
 
 	logger = logger.With("foo", "bar").
 		WithGroup("the-group").
-		With("bar", "baz")
+		With("bar", "baz", "logger", "main")
 
-	logger.Info("group info", "attr", "value")
+	logger.Info("group info", "multiline", "hello\nworld", "attr", "value")
 }

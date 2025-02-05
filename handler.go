@@ -12,7 +12,21 @@ import (
 	"time"
 )
 
-var cwd, _ = os.Getwd()
+var cwd string
+
+func init() {
+	cwd, _ = os.Getwd()
+	// We compare cwd to the filepath in runtime.Frame.File
+	// It turns out, an old legacy behavior of go is that runtime.Frame.File
+	// will always contain file paths with forward slashes, even if compiled
+	// on Windows.
+	// See https://github.com/golang/go/issues/3335
+	// and https://github.com/golang/go/issues/18151
+	cwd = strings.ReplaceAll(cwd, "\\", "/")
+}
+
+// %[time]t %[source]3-h %[logger]8-h %[lvl]3l | %[msg]m %a
+// timef(), source(3, left), header(logger, 8, right) levelAbbr() string("|") msg() attrs()
 
 // HandlerOptions are options for a ConsoleHandler.
 // A zero HandlerOptions consists entirely of default values.
@@ -38,16 +52,33 @@ type HandlerOptions struct {
 	// Theme defines the colorized output using ANSI escape sequences
 	Theme Theme
 
+	// ReplaceAttr is called to rewrite each non-group attribute before it is logged.
+	// See [slog.HandlerOptions]
+	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
+
 	// Headers are a list of attribute keys.  These attributes will be removed from
 	// the trailing attr list, and the values will be inserted between
 	// the level/source and the message, in the configured order.
 	Headers []string
 
-	// ReplaceAttr is called to rewrite each non-group attribute before it is logged.
-	// See [slog.HandlerOptions]
-	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
-
+	// HeaderWidth controls whether the header fields take up a fixed width in the log line.
+	// If 0, the full value of all headers are printed, meaning this section of the log line
+	// will vary in length from one line to the next.
+	// If >0, headers will be truncated or padded as needed to fit in the specified width.  This can
+	// make busy logs easier to scan, as it ensures that the timestamp, headers, level, and message
+	// fields are always aligned on the same column.
+	// The available width will be allocated equally to
 	HeaderWidth int
+
+	// TruncateSourcePath shortens the source file path, if AddSource=true.
+	// If 0, no truncation is done.
+	// If >0, the file path is truncated to that many trailing path segments.
+	// For example:
+	//
+	//     users.go:34						// TruncateSourcePath = 1
+	//     models/users.go:34				// TruncateSourcePath = 2
+	//     ...etc
+	TruncateSourcePath int
 }
 
 type Handler struct {
