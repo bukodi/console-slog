@@ -130,8 +130,9 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 	trailerBuf := &enc.trailerBuf
 
 	enc.writeTimestamp(headerBuf, rec.Time)
-	enc.writeLevel(headerBuf, rec.Level)
 
+	enc.writeLevel(middleBuf, rec.Level)
+	enc.writeHeaderSeparator(middleBuf)
 	enc.writeMessage(middleBuf, rec.Level, rec.Message)
 
 	middleBuf.copy(&h.context)
@@ -216,8 +217,6 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 		return true
 	})
 
-	headerLen := headerBuf.Len()
-
 	if h.opts.HeaderWidth > 0 {
 		for _, a := range headers {
 			enc.writeHeader(headerBuf, a, h.opts.HeaderWidth)
@@ -232,11 +231,6 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 		if len(headers) > 0 {
 			enc.writeHeaders(headerBuf, headers)
 		}
-	}
-
-	// connect the sections
-	if headerBuf.Len() > headerLen {
-		enc.writeHeaderSeparator(headerBuf)
 	}
 
 	if trailerBuf.Len() == 0 {
