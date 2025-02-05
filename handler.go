@@ -241,13 +241,12 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 		enc.NewLine(trailerBuf)
 	}
 
+	// concatenate the buffers together before writing to out, so the entire
+	// log line is written in a single Write call
+	headerBuf.copy(middleBuf)
+	headerBuf.copy(trailerBuf)
+
 	if _, err := headerBuf.WriteTo(h.out); err != nil {
-		return err
-	}
-	if _, err := middleBuf.WriteTo(h.out); err != nil {
-		return err
-	}
-	if _, err := trailerBuf.WriteTo(h.out); err != nil {
 		return err
 	}
 
