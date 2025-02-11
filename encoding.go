@@ -16,7 +16,6 @@ var encoderPool = &sync.Pool{
 		e.buf = make(buffer, 0, 1024)
 		e.attrBuf = make(buffer, 0, 1024)
 		e.multilineAttrBuf = make(buffer, 0, 1024)
-		e.headers = make([]slog.Attr, 0, 6)
 		return e
 	},
 }
@@ -25,8 +24,6 @@ type encoder struct {
 	h                              *Handler
 	buf, attrBuf, multilineAttrBuf buffer
 	groups                         []string
-	headers                        []slog.Attr
-	headersCopied                  bool
 }
 
 func newEncoder(h *Handler) *encoder {

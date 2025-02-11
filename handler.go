@@ -53,20 +53,6 @@ type HandlerOptions struct {
 	// See [slog.HandlerOptions]
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 
-	// Headers are a list of attribute keys.  These attributes will be removed from
-	// the trailing attr list, and the values will be inserted between
-	// the level/source and the message, in the configured order.
-	Headers []string
-
-	// HeaderWidth controls whether the header fields take up a fixed width in the log line.
-	// If 0, the full value of all headers are printed, meaning this section of the log line
-	// will vary in length from one line to the next.
-	// If >0, headers will be truncated or padded as needed to fit in the specified width.  This can
-	// make busy logs easier to scan, as it ensures that the timestamp, headers, level, and message
-	// fields are always aligned on the same column.
-	// The available width will be allocated equally to
-	HeaderWidth int
-
 	// TruncateSourcePath shortens the source file path, if AddSource=true.
 	// If 0, no truncation is done.
 	// If >0, the file path is truncated to that many trailing path segments.
@@ -77,8 +63,36 @@ type HandlerOptions struct {
 	//     ...etc
 	TruncateSourcePath int
 
+	// HeaderFormat specifies the format of the log header.
+	//
+	// The default format is "%t %l %[source]h > %m".
+	//
+	// The format is a string containing verbs, which are expanded as follows:
+	//
+	//	%t	timestamp
+	//	%l	abbreviated level (e.g. "INF")
+	//	%L	level (e.g. "INFO")
+	//	%m	message
+	//	%[key]h	header with the given key.
+	//
+	// Headers print the value of the attribute with the given key, and remove that
+	// attribute from the end of the log line.
+	//
+	// Headers can be customized with width, alignment, and non-capturing,
+	// similar to fmt.Printf verbs. For example:
+	//
+	//	%[key]10h		// left-aligned, width 10
+	//	%[key]-10h		// right-aligned, width 10
+	//	%[key]+h		// non-capturing
+	//	%[key]-10+h		// right-aligned, width 10, non-capturing
+	//
+	// If the header is non-capturing, the header field will be printed, but
+	// the attribute will still be available for matching subsequent header fields,
+	// and/or printing in the attributes section of the log line.
 	HeaderFormat string
 }
+
+const defaultHeaderFormat = "%t %l %[source]h > %m"
 
 type Handler struct {
 	opts                      HandlerOptions
@@ -87,7 +101,7 @@ type Handler struct {
 	groups                    []string
 	context, multilineContext buffer
 	fields                    []any
-	numHeaders                int
+	headerFields              []headerField
 }
 
 type timestampField struct{}
@@ -123,18 +137,18 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 		opts.Theme = NewDefaultTheme()
 	}
 	if opts.HeaderFormat == "" {
-		opts.HeaderFormat = "%t %l %[source]h > %m" // default format
+		opts.HeaderFormat = defaultHeaderFormat // default format
 	}
 
-	fields, numHeaders := parseFormat(opts.HeaderFormat)
+	fields, headerFields := parseFormat(opts.HeaderFormat)
 
 	return &Handler{
-		opts:        *opts, // Copy struct
-		out:         out,
-		groupPrefix: "",
-		context:     nil,
-		fields:      fields,
-		numHeaders:  numHeaders,
+		opts:         *opts, // Copy struct
+		out:          out,
+		groupPrefix:  "",
+		context:      nil,
+		fields:       fields,
+		headerFields: headerFields,
 	}
 }
 
@@ -214,21 +228,17 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	}
 
 	// todo: make this part of the encoder struct
-	headers := make([]slog.Attr, h.numHeaders)
+	headers := make([]slog.Attr, len(h.headerFields))
 
 	enc.attrBuf.Append(h.context)
 	enc.multilineAttrBuf.Append(h.multilineContext)
 
 	rec.Attrs(func(a slog.Attr) bool {
-		headerIdx := -1
-		for _, f := range h.fields {
-			if f, ok := f.(headerField); ok {
-				headerIdx++
-				if f.key == a.Key {
-					headers[headerIdx] = a
-					if f.capture {
-						return true
-					}
+		for i, f := range h.headerFields {
+			if f.key == a.Key {
+				headers[i] = a
+				if f.capture {
+					return true
 				}
 			}
 		}
@@ -283,6 +293,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 
 // WithAttrs implements slog.Handler.
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	// todo: reuse the encode for memoization
 	attrs, fields := h.memoizeHeaders(attrs)
 
 	enc := newEncoder(h)
@@ -309,7 +320,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		multilineContext: newMultiCtx,
 		groups:           h.groups,
 		fields:           fields,
-		numHeaders:       h.numHeaders,
+		headerFields:     h.headerFields,
 	}
 }
 
@@ -321,13 +332,13 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		groupPrefix = h.groupPrefix + "." + name
 	}
 	return &Handler{
-		opts:        h.opts,
-		out:         h.out,
-		groupPrefix: groupPrefix,
-		context:     h.context,
-		groups:      append(h.groups, name),
-		numHeaders:  h.numHeaders,
-		fields:      h.fields,
+		opts:         h.opts,
+		out:          h.out,
+		groupPrefix:  groupPrefix,
+		context:      h.context,
+		groups:       append(h.groups, name),
+		fields:       h.fields,
+		headerFields: h.headerFields,
 	}
 }
 
@@ -420,9 +431,9 @@ func (p ParseFormatResult) Equal(other ParseFormatResult) bool {
 // Use the non-capturing header modifier '+' to disable capturing.  If a header is not capturing, the attribute
 // will still be available for matching subsequent header fields, and will be included in the attributes section
 // of the log line.
-func parseFormat(format string) (fields []any, headerCount int) {
+func parseFormat(format string) (fields []any, headerFields []headerField) {
 	fields = make([]any, 0)
-	headerCount = 0
+	headerFields = make([]headerField, 0)
 
 	for i := 0; i < len(format); i++ {
 		if format[i] != '%' {
@@ -506,13 +517,14 @@ func parseFormat(format string) (fields []any, headerCount int) {
 				fields = append(fields, "%!h(MISSING_HEADER_NAME)")
 				continue
 			}
-			field = headerField{
+			hf := headerField{
 				key:        key,
 				width:      width,
 				rightAlign: rightAlign,
 				capture:    capture,
 			}
-			headerCount++
+			field = hf
+			headerFields = append(headerFields, hf)
 		case 'm':
 			field = messageField{}
 		case 'l':
@@ -530,5 +542,5 @@ func parseFormat(format string) (fields []any, headerCount int) {
 		fields = append(fields, field)
 	}
 
-	return fields, headerCount
+	return fields, headerFields
 }

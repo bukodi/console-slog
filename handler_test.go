@@ -944,7 +944,7 @@ func TestParseFormat(t *testing.T) {
 		name        string
 		format      string
 		wantFields  []any
-		wantHeaders int
+		wantHeaders []headerField
 	}{
 		{
 			name:   "basic format",
@@ -956,7 +956,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "with header",
@@ -970,7 +970,9 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", capture: true},
+			},
 		},
 		{
 			name:   "header with width",
@@ -984,7 +986,9 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", width: 5, capture: true},
+			},
 		},
 		{
 			name:   "header with right align",
@@ -998,7 +1002,9 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", rightAlign: true, capture: true},
+			},
 		},
 		{
 			name:   "header with width and right align",
@@ -1012,7 +1018,9 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", width: 5, rightAlign: true, capture: true},
+			},
 		},
 		{
 			name:   "non-capturing header",
@@ -1026,7 +1034,9 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", capture: false},
+			},
 		},
 		{
 			name:   "multiple headers",
@@ -1042,7 +1052,10 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 2,
+			wantHeaders: []headerField{
+				{key: "logger", capture: true},
+				{key: "source", capture: true},
+			},
 		},
 		{
 			name:   "with literal text",
@@ -1056,7 +1069,7 @@ func TestParseFormat(t *testing.T) {
 				messageField{},
 				" suffix",
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "with escaped percent",
@@ -1070,7 +1083,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "with non-abbreviated level",
@@ -1082,7 +1095,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "with right-aligned non-abbreviated level",
@@ -1094,7 +1107,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "error: missing verb",
@@ -1104,7 +1117,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				"%!(MISSING_VERB)",
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "error: missing header name",
@@ -1116,7 +1129,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "error: missing closing bracket",
@@ -1128,7 +1141,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "error: invalid verb",
@@ -1140,7 +1153,7 @@ func TestParseFormat(t *testing.T) {
 				" ",
 				messageField{},
 			},
-			wantHeaders: 0,
+			wantHeaders: []headerField{},
 		},
 		{
 			name:   "with extra whitespace",
@@ -1154,15 +1167,17 @@ func TestParseFormat(t *testing.T) {
 				"      ",
 				messageField{},
 			},
-			wantHeaders: 1,
+			wantHeaders: []headerField{
+				{key: "logger", capture: true},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotFields, gotHeaders := parseFormat(tt.format)
-			if gotHeaders != tt.wantHeaders {
-				t.Errorf("parseFormat() header count = %v, want %v", gotHeaders, tt.wantHeaders)
+			if !reflect.DeepEqual(gotHeaders, tt.wantHeaders) {
+				t.Errorf("parseFormat() headers =\n%#v\nwant:\n%#v", gotHeaders, tt.wantHeaders)
 			}
 			if !reflect.DeepEqual(gotFields, tt.wantFields) {
 				t.Errorf("parseFormat() fields =\n%#v\nwant:\n%#v", gotFields, tt.wantFields)
