@@ -3,11 +3,11 @@ package console
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 )
@@ -24,9 +24,6 @@ func init() {
 	// and https://github.com/golang/go/issues/18151
 	cwd = strings.ReplaceAll(cwd, "\\", "/")
 }
-
-// %[time]t %[source]3-h %[logger]8-h %[lvl]3l | %[msg]m %a
-// timef(), source(3, left), header(logger, 8, right) levelAbbr() string("|") msg() attrs()
 
 // HandlerOptions are options for a ConsoleHandler.
 // A zero HandlerOptions consists entirely of default values.
@@ -79,16 +76,33 @@ type HandlerOptions struct {
 	//     models/users.go:34				// TruncateSourcePath = 2
 	//     ...etc
 	TruncateSourcePath int
+
+	HeaderFormat string
 }
 
 type Handler struct {
-	opts        HandlerOptions
-	out         io.Writer
-	groupPrefix string
-	groups      []string
-	context     buffer
-	headers     []slog.Attr
+	opts                      HandlerOptions
+	out                       io.Writer
+	groupPrefix               string
+	groups                    []string
+	context, multilineContext buffer
+	fields                    []any
+	numHeaders                int
 }
+
+type timestampField struct{}
+type headerField struct {
+	key        string
+	width      int
+	rightAlign bool
+	capture    bool
+	memo       string
+}
+type levelField struct {
+	abbreviated bool
+	rightAlign  bool
+}
+type messageField struct{}
 
 var _ slog.Handler = (*Handler)(nil)
 
@@ -108,12 +122,19 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 	if opts.Theme == nil {
 		opts.Theme = NewDefaultTheme()
 	}
+	if opts.HeaderFormat == "" {
+		opts.HeaderFormat = "%t %l %[source]h > %m" // default format
+	}
+
+	fields, numHeaders := parseFormat(opts.HeaderFormat)
+
 	return &Handler{
 		opts:        *opts, // Copy struct
 		out:         out,
 		groupPrefix: "",
 		context:     nil,
-		headers:     make([]slog.Attr, len(opts.Headers)),
+		fields:      fields,
+		numHeaders:  numHeaders,
 	}
 }
 
@@ -122,20 +143,66 @@ func (h *Handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.opts.Level.Level()
 }
 
-// Handle implements slog.Handler.
-func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
+func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
+	offset := e.attrBuf.Len()
+	e.writeAttr(&e.attrBuf, a, groupPrefix)
+
+	// check if the last attr written has newlines in it
+	// if so, move it to the trailerBuf
+	lastAttr := e.attrBuf[offset:]
+	if bytes.IndexByte(lastAttr, '\n') >= 0 {
+		// todo: consider splitting the key and the value
+		// components, so the `key=` can be printed on its
+		// own line, and the value will not share any of its
+		// lines with anything else.  Like:
+		//
+		// INF msg key1=val1
+		// key2=
+		// val2 line 1
+		// val2 line 2
+		// key3=
+		// val3 line 1
+		// val3 line 2
+		//
+		// and maybe consider printing the key for these values
+		// differently, like:
+		//
+		// === key2 ===
+		// val2 line1
+		// val2 line2
+		// === key3 ===
+		// val3 line 1
+		// val3 line 2
+		//
+		// Splitting the key and value doesn't work up here in
+		// Handle() though, because we don't know where the term
+		// control characters are.  Would need to push this
+		// multiline handling deeper into encoder, or pass
+		// offsets back up from writeAttr()
+		//
+		// if k, v, ok := bytes.Cut(lastAttr, []byte("=")); ok {
+		// trailerBuf.AppendString("=== ")
+		// trailerBuf.Append(k[1:])
+		// trailerBuf.AppendString(" ===\n")
+		// trailerBuf.AppendByte('=')
+		// trailerBuf.AppendByte('\n')
+		// trailerBuf.AppendString("---------------------\n")
+		// trailerBuf.Append(v)
+		// trailerBuf.AppendString("\n---------------------\n")
+		// trailerBuf.AppendByte('\n')
+		// } else {
+		// trailerBuf.Append(lastAttr[1:])
+		// trailerBuf.AppendByte('\n')
+		// }
+		e.multilineAttrBuf.Append(lastAttr)
+
+		// rewind the middle buffer
+		e.attrBuf = e.attrBuf[:offset]
+	}
+}
+
+func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	enc := newEncoder(h)
-	headerBuf := &enc.headerBuf
-	middleBuf := &enc.middleBuf
-	trailerBuf := &enc.trailerBuf
-
-	enc.writeTimestamp(headerBuf, rec.Time)
-
-	enc.writeLevel(middleBuf, rec.Level)
-	enc.writeHeaderSeparator(middleBuf)
-	enc.writeMessage(middleBuf, rec.Level, rec.Message)
-
-	middleBuf.copy(&h.context)
 
 	if h.opts.AddSource && rec.PC > 0 {
 		src := slog.Source{}
@@ -146,107 +213,67 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 		rec.AddAttrs(slog.Any(slog.SourceKey, &src))
 	}
 
-	headers := h.headers
-	localHeaders := false
+	// todo: make this part of the encoder struct
+	headers := make([]slog.Attr, h.numHeaders)
+
+	enc.attrBuf.Append(h.context)
+	enc.multilineAttrBuf.Append(h.multilineContext)
+
 	rec.Attrs(func(a slog.Attr) bool {
-		idx := slices.IndexFunc(h.opts.Headers, func(s string) bool { return s == a.Key })
-		if idx >= 0 {
-			if !localHeaders {
-				localHeaders = true
-				headers = append(enc.headers, h.headers...)
+		headerIdx := -1
+		for _, f := range h.fields {
+			if f, ok := f.(headerField); ok {
+				headerIdx++
+				if f.key == a.Key {
+					headers[headerIdx] = a
+					if f.capture {
+						return true
+					}
+				}
 			}
-			headers[idx] = a
-			return true
 		}
 
-		offset := middleBuf.Len()
-		enc.writeAttr(middleBuf, a, h.groupPrefix)
-
-		// check if the last attr written has newlines in it
-		// if so, move it to the trailerBuf
-		lastAttr := (*middleBuf)[offset:]
-		if bytes.IndexByte(lastAttr, '\n') >= 0 {
-			// todo: consider splitting the key and the value
-			// components, so the `key=` can be printed on its
-			// own line, and the value will not share any of its
-			// lines with anything else.  Like:
-			//
-			// INF msg key1=val1
-			// key2=
-			// val2 line 1
-			// val2 line 2
-			// key3=
-			// val3 line 1
-			// val3 line 2
-			//
-			// and maybe consider printing the key for these values
-			// differently, like:
-			//
-			// === key2 ===
-			// val2 line1
-			// val2 line2
-			// === key3 ===
-			// val3 line 1
-			// val3 line 2
-			//
-			// Splitting the key and value doesn't work up here in
-			// Handle() though, because we don't know where the term
-			// control characters are.  Would need to push this
-			// multiline handling deeper into encoder, or pass
-			// offsets back up from writeAttr()
-			//
-			// if k, v, ok := bytes.Cut(lastAttr, []byte("=")); ok {
-			// trailerBuf.AppendString("=== ")
-			// trailerBuf.Append(k[1:])
-			// trailerBuf.AppendString(" ===\n")
-			// trailerBuf.AppendByte('=')
-			// trailerBuf.AppendByte('\n')
-			// trailerBuf.AppendString("---------------------\n")
-			// trailerBuf.Append(v)
-			// trailerBuf.AppendString("\n---------------------\n")
-			// trailerBuf.AppendByte('\n')
-			// } else {
-			// trailerBuf.Append(lastAttr[1:])
-			// trailerBuf.AppendByte('\n')
-			// }
-			trailerBuf.Append(lastAttr)
-
-			// rewind the middle buffer
-			*middleBuf = (*middleBuf)[:offset]
-		}
+		enc.encodeAttr(h.groupPrefix, a)
 		return true
 	})
 
-	if h.opts.HeaderWidth > 0 {
-		for _, a := range headers {
-			enc.writeHeader(headerBuf, a, h.opts.HeaderWidth)
+	var swallow bool
+	headerIdx := 0
+	var l int
+	for _, f := range h.fields {
+		switch f := f.(type) {
+		case headerField:
+			if headers[headerIdx].Equal(slog.Attr{}) && f.memo != "" {
+				enc.buf.AppendString(f.memo)
+			} else {
+				enc.writeHeader(&enc.buf, headers[headerIdx], f.width, f.rightAlign)
+			}
+			headerIdx++
+		case levelField:
+			enc.writeLevel(&enc.buf, rec.Level, f.abbreviated)
+		case messageField:
+			enc.writeMessage(&enc.buf, rec.Level, rec.Message)
+		case timestampField:
+			enc.writeTimestamp(&enc.buf, rec.Time)
+		case string:
+			if swallow {
+				f = strings.TrimPrefix(f, " ")
+			}
+			enc.buf.AppendString(f)
+			l = 0 // ensure the next field is not swallowed
 		}
-	} else {
-		// not using a fixed width header.  Just write the entire source
-		// and headers to the buf sequentially.
-		// if h.opts.AddSource {
-		// 	enc.writeSource(headerBuf, rec.PC, cwd)
-		// }
-
-		if len(headers) > 0 {
-			enc.writeHeaders(headerBuf, headers)
-		}
-	}
-
-	if trailerBuf.Len() == 0 {
-		// if there were no multiline attrs, terminate the line with a newline
-		enc.NewLine(middleBuf)
-	} else {
-		// if there were multiline attrs, write middle <-> trailer separater
-		enc.NewLine(trailerBuf)
+		l2 := enc.buf.Len()
+		swallow = l2 == l
+		l = l2
 	}
 
 	// concatenate the buffers together before writing to out, so the entire
 	// log line is written in a single Write call
-	headerBuf.copy(middleBuf)
-	headerBuf.copy(trailerBuf)
+	enc.buf.copy(&enc.attrBuf)
+	enc.buf.copy(&enc.multilineAttrBuf)
+	enc.NewLine(&enc.buf)
 
-	if _, err := headerBuf.WriteTo(h.out); err != nil {
+	if _, err := enc.buf.WriteTo(h.out); err != nil {
 		return err
 	}
 
@@ -256,20 +283,33 @@ func (h *Handler) Handle(_ context.Context, rec slog.Record) error {
 
 // WithAttrs implements slog.Handler.
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	headers := h.extractHeaders(attrs)
-	newCtx := h.context
+	attrs, fields := h.memoizeHeaders(attrs)
+
 	enc := newEncoder(h)
 	for _, a := range attrs {
-		enc.writeAttr(&newCtx, a, h.groupPrefix)
+		enc.encodeAttr(h.groupPrefix, a)
 	}
-	newCtx.Clip()
+
+	newCtx := h.context
+	newMultiCtx := h.multilineContext
+	if len(enc.attrBuf) > 0 {
+		newCtx = append(newCtx, enc.attrBuf...)
+		newCtx.Clip()
+	}
+	if len(enc.multilineAttrBuf) > 0 {
+		newMultiCtx = append(newMultiCtx, enc.multilineAttrBuf...)
+		newMultiCtx.Clip()
+	}
+
 	return &Handler{
-		opts:        h.opts,
-		out:         h.out,
-		groupPrefix: h.groupPrefix,
-		context:     newCtx,
-		groups:      h.groups,
-		headers:     headers,
+		opts:             h.opts,
+		out:              h.out,
+		groupPrefix:      h.groupPrefix,
+		context:          newCtx,
+		multilineContext: newMultiCtx,
+		groups:           h.groups,
+		fields:           fields,
+		numHeaders:       h.numHeaders,
 	}
 }
 
@@ -286,28 +326,209 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		groupPrefix: groupPrefix,
 		context:     h.context,
 		groups:      append(h.groups, name),
-		headers:     h.headers,
+		numHeaders:  h.numHeaders,
+		fields:      h.fields,
 	}
 }
 
-// extractHeaders scans the attributes for keys specified in Headers.
-// If found, their values are saved in a new list.
-// The original attribute list will be modified to remove the extracted attributes.
-func (h *Handler) extractHeaders(attrs []slog.Attr) (headers []slog.Attr) {
-	changed := false
-	headers = h.headers
-	for i, attr := range attrs {
-		idx := slices.IndexFunc(h.opts.Headers, func(s string) bool { return s == attr.Key })
-		if idx >= 0 {
-			if !changed {
-				// make a copy of prefixes:
-				headers = make([]slog.Attr, len(h.headers))
-				copy(headers, h.headers)
+func (h *Handler) memoizeHeaders(attrs []slog.Attr) ([]slog.Attr, []any) {
+	enc := newEncoder(h)
+	defer enc.free()
+	buf := &enc.buf
+	newFields := make([]any, len(h.fields))
+	copy(newFields, h.fields)
+	remainingAttrs := make([]slog.Attr, 0, len(attrs))
+
+	for _, attr := range attrs {
+		capture := false
+		for i, field := range h.fields {
+			if headerField, ok := field.(headerField); ok {
+				if headerField.key == attr.Key {
+					buf.Reset()
+					enc.writeHeader(buf, attr, headerField.width, headerField.rightAlign)
+					headerField.memo = buf.String()
+					newFields[i] = headerField
+					if headerField.capture {
+						capture = true
+					}
+					// don't break, in case there are multiple headers with the same key
+				}
 			}
-			headers[idx] = attr
-			attrs[i] = slog.Attr{} // remove the prefix attribute
-			changed = true
+		}
+		if !capture {
+			remainingAttrs = append(remainingAttrs, attr)
 		}
 	}
-	return
+	return remainingAttrs, newFields
+}
+
+// ParseFormatResult contains the parsed fields and header count from a format string
+type ParseFormatResult struct {
+	Fields      []any
+	HeaderCount int
+}
+
+// Equal compares two ParseFormatResults for equality
+func (p ParseFormatResult) Equal(other ParseFormatResult) bool {
+	if p.HeaderCount != other.HeaderCount {
+		return false
+	}
+	if len(p.Fields) != len(other.Fields) {
+		return false
+	}
+	for i := range p.Fields {
+		if fmt.Sprintf("%#v", p.Fields[i]) != fmt.Sprintf("%#v", other.Fields[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// parseFormat parses a format string into a list of fields and the number of headerFields.
+// Supported format verbs:
+// %t - timestampField
+// %h - headerField, requires [name] modifier, supports width, - and + modifiers
+// %m - messageField
+// %l - abbreviated levelField
+// %L - non-abbreviated levelField, supports - modifier
+//
+// Modifiers:
+// [name]: the key of the attribute to capture as a header, required
+// width: int fixed width, optional
+// -: for right alignment, optional
+// +: for non-capturing header, optional
+//
+// Examples:
+//
+//	"%t %l %m"                         // timestamp, level, message
+//	"%t [%l] %m"                       // timestamp, level in brackets, message
+//	"%t %l:%m"                         // timestamp, level:message
+//	"%t %l %[key]h %m"                 // timestamp, level, header with key "key", message
+//	"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
+//	"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
+//	"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
+//	"%t %l %[key]10+h %m"              // timestamp, level, captured header with key "key" and width 10, message
+//	"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned captured header with key "key" and width 10, message
+//	"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
+//	"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
+//	"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
+//	"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
+//	"%% %t %l %m"                      // literal "%", timestamp, level, message
+//
+// Note that headers will "capture" their matching attribute by default, which means that attribute will not
+// be included in the attributes section of the log line, and will not be matched by subsequent header fields.
+// Use the non-capturing header modifier '+' to disable capturing.  If a header is not capturing, the attribute
+// will still be available for matching subsequent header fields, and will be included in the attributes section
+// of the log line.
+func parseFormat(format string) (fields []any, headerCount int) {
+	fields = make([]any, 0)
+	headerCount = 0
+
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			// Find the next % or end of string
+			start := i
+			for i < len(format) && format[i] != '%' {
+				i++
+			}
+			fields = append(fields, format[start:i])
+			i-- // compensate for loop increment
+			continue
+		}
+
+		// Handle %% escape
+		if i+1 < len(format) && format[i+1] == '%' {
+			fields = append(fields, "%")
+			i++
+			continue
+		}
+
+		// Parse format verb and any modifiers
+		i++
+		if i >= len(format) {
+			fields = append(fields, "%!(MISSING_VERB)")
+			break
+		}
+
+		// Check for modifiers before verb
+		var field any
+		var width int
+		var rightAlign bool
+		var capture bool = true // default to capturing for headers
+		var key string
+
+		// Look for [name] modifier
+		if format[i] == '[' {
+			// Find the next ] or end of string
+			end := i + 1
+			for end < len(format) && format[end] != ']' && format[end] != ' ' {
+				end++
+			}
+			if end >= len(format) || format[end] != ']' {
+				i = end - 1 // Position just before the next character to process
+				fields = append(fields, "%!(MISSING_CLOSING_BRACKET)")
+				continue
+			}
+			key = format[i+1 : end]
+			i = end + 1
+		}
+
+		// Look for modifiers
+		for i < len(format) {
+			if format[i] == '-' {
+				rightAlign = true
+				i++
+			} else if format[i] == '+' && key != "" { // '+' only valid for headers
+				capture = false
+				i++
+			} else if format[i] >= '0' && format[i] <= '9' && key != "" { // width only valid for headers
+				width = 0
+				for i < len(format) && format[i] >= '0' && format[i] <= '9' {
+					width = width*10 + int(format[i]-'0')
+					i++
+				}
+			} else {
+				break
+			}
+		}
+
+		if i >= len(format) {
+			fields = append(fields, "%!(MISSING_VERB)")
+			break
+		}
+
+		// Parse the verb
+		switch format[i] {
+		case 't':
+			field = timestampField{}
+		case 'h':
+			if key == "" {
+				fields = append(fields, "%!h(MISSING_HEADER_NAME)")
+				continue
+			}
+			field = headerField{
+				key:        key,
+				width:      width,
+				rightAlign: rightAlign,
+				capture:    capture,
+			}
+			headerCount++
+		case 'm':
+			field = messageField{}
+		case 'l':
+			field = levelField{abbreviated: true}
+		case 'L':
+			field = levelField{
+				abbreviated: false,
+				rightAlign:  rightAlign,
+			}
+		default:
+			fields = append(fields, fmt.Sprintf("%%!%c(INVALID_VERB)", format[i]))
+			continue
+		}
+
+		fields = append(fields, field)
+	}
+
+	return fields, headerCount
 }

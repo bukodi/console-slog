@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,19 +13,20 @@ var encoderPool = &sync.Pool{
 	New: func() any {
 		e := new(encoder)
 		e.groups = make([]string, 0, 10)
-		e.headerBuf = make(buffer, 0, 1024)
-		e.middleBuf = make(buffer, 0, 1024)
-		e.trailerBuf = make(buffer, 0, 1024)
+		e.buf = make(buffer, 0, 1024)
+		e.attrBuf = make(buffer, 0, 1024)
+		e.multilineAttrBuf = make(buffer, 0, 1024)
 		e.headers = make([]slog.Attr, 0, 6)
 		return e
 	},
 }
 
 type encoder struct {
-	h                                *Handler
-	headerBuf, middleBuf, trailerBuf buffer
-	groups                           []string
-	headers                          []slog.Attr
+	h                              *Handler
+	buf, attrBuf, multilineAttrBuf buffer
+	groups                         []string
+	headers                        []slog.Attr
+	headersCopied                  bool
 }
 
 func newEncoder(h *Handler) *encoder {
@@ -43,9 +43,9 @@ func (e *encoder) free() {
 		return
 	}
 	e.h = nil
-	e.headerBuf.Reset()
-	e.middleBuf.Reset()
-	e.trailerBuf.Reset()
+	e.buf.Reset()
+	e.attrBuf.Reset()
+	e.multilineAttrBuf.Reset()
 	e.groups = e.groups[:0]
 	encoderPool.Put(e)
 }
@@ -125,7 +125,6 @@ func (e *encoder) writeTimestamp(buf *buffer, tt time.Time) {
 			// handle all non-time values by printing them like
 			// an attr value
 			e.writeColoredValue(buf, attr.Value, e.h.opts.Theme.Timestamp())
-			buf.AppendByte(' ')
 			return
 		}
 
@@ -138,64 +137,6 @@ func (e *encoder) writeTimestamp(buf *buffer, tt time.Time) {
 	}
 
 	e.writeColoredTime(buf, tt, e.h.opts.TimeFormat, e.h.opts.Theme.Timestamp())
-	buf.AppendByte(' ')
-}
-
-// writeSource returns true if source was written, false if elided
-func (e *encoder) writeSource(buf *buffer, pc uintptr, cwd string) {
-	src := slog.Source{}
-
-	if pc > 0 {
-		frame, _ := runtime.CallersFrames([]uintptr{pc}).Next()
-		src.Function = frame.Function
-		src.File = frame.File
-		src.Line = frame.Line
-	}
-
-	if e.h.opts.ReplaceAttr != nil {
-		attr := e.h.opts.ReplaceAttr(nil, slog.Any(slog.SourceKey, &src))
-		attr.Value = attr.Value.Resolve()
-
-		if attr.Value.Equal(slog.Value{}) {
-			return
-		}
-
-		switch attr.Value.Kind() {
-		case slog.KindAny:
-			if newsrc, ok := attr.Value.Any().(*slog.Source); ok {
-				if newsrc == nil {
-					// elide
-					return
-				}
-
-				src.File = newsrc.File
-				src.Line = newsrc.Line
-				// replaced prior source fields, proceed with normal source processing
-				break
-			}
-			// source replaced with some other type of value,
-			// fallthrough to processing other value types
-			fallthrough
-		default:
-			// handle all non-time values by printing them like
-			// an attr value
-			e.writeColoredValue(buf, attr.Value, e.h.opts.Theme.Timestamp())
-			buf.AppendByte(' ')
-			return
-		}
-	}
-
-	if src.File == "" && src.Line == 0 {
-		// elide
-		return
-	}
-
-	e.withColor(buf, e.h.opts.Theme.Source(), func() {
-		buf.AppendString(trimmedPath(src.File, cwd))
-		buf.AppendByte(':')
-		buf.AppendInt(int64(src.Line))
-		buf.AppendByte(' ')
-	})
 }
 
 func (e *encoder) writeMessage(buf *buffer, level slog.Level, msg string) {
@@ -219,44 +160,65 @@ func (e *encoder) writeMessage(buf *buffer, level slog.Level, msg string) {
 	e.writeColoredString(buf, msg, style)
 }
 
-func (e encoder) writeHeaders(buf *buffer, headers []slog.Attr) {
-	for _, a := range headers {
-		if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
-			a = e.h.opts.ReplaceAttr(nil, a)
-			a.Value = a.Value.Resolve()
-		}
-		if a.Value.Equal(slog.Value{}) {
-			continue
-		}
-		e.writeColoredValue(buf, a.Value, e.h.opts.Theme.Source())
-		buf.AppendByte(' ')
-	}
-}
+// func (e encoder) writeHeaders(buf *buffer, headers []slog.Attr) {
+// 	for _, a := range headers {
+// 		if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
+// 			a = e.h.opts.ReplaceAttr(nil, a)
+// 			a.Value = a.Value.Resolve()
+// 		}
+// 		if a.Value.Equal(slog.Value{}) {
+// 			continue
+// 		}
+// 		e.writeColoredValue(buf, a.Value, e.h.opts.Theme.Source())
+// 		buf.AppendByte(' ')
+// 	}
+// }
 
-func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int) int {
+func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int, rightAlign bool) {
 	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
 		a = e.h.opts.ReplaceAttr(nil, a)
 		a.Value = a.Value.Resolve()
 	}
 	if a.Value.Equal(slog.Value{}) {
-		return 0
+		// just pad as needed
+		if width > 0 {
+			buf.Pad(width, ' ')
+		}
+		return
 	}
+
 	e.withColor(buf, e.h.opts.Theme.Source(), func() {
 		l := buf.Len()
 		e.writeValue(buf, a.Value)
+		if width <= 0 {
+			return
+		}
 		// truncate or pad to required width
 		remainingWidth := l + width - buf.Len()
 		if remainingWidth < 0 {
 			// truncate
 			buf.Truncate(l + width)
 		} else if remainingWidth > 0 {
-			// pad
-			buf.Pad(remainingWidth, ' ')
+			if rightAlign {
+				// For right alignment, shift the text right in-place:
+				// 1. Get the text length
+				textLen := buf.Len() - l
+				// 2. Add padding to reach final width
+				buf.Pad(remainingWidth, ' ')
+				// 3. Move the text to the right by copying from end to start
+				for i := 0; i < textLen; i++ {
+					(*buf)[buf.Len()-1-i] = (*buf)[l+textLen-1-i]
+				}
+				// 4. Fill the left side with spaces
+				for i := 0; i < remainingWidth; i++ {
+					(*buf)[l+i] = ' '
+				}
+			} else {
+				// Left align - just pad with spaces
+				buf.Pad(remainingWidth, ' ')
+			}
 		}
 	})
-
-	buf.AppendByte(' ')
-	return buf.Len()
 }
 
 func (e encoder) writeHeaderSeparator(buf *buffer) {
@@ -294,7 +256,6 @@ func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
 	}
 
 	buf.AppendByte(' ')
-
 	e.withColor(buf, e.h.opts.Theme.AttrKey(), func() {
 		if group != "" {
 			buf.AppendString(group)
@@ -354,50 +315,12 @@ func (e *encoder) writeValue(buf *buffer, value slog.Value) {
 }
 
 func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod) {
-	switch value.Kind() {
-	case slog.KindInt64:
-		e.writeColoredInt(buf, value.Int64(), style)
-	case slog.KindBool:
-		e.writeColoredBool(buf, value.Bool(), style)
-	case slog.KindFloat64:
-		e.writeColoredFloat(buf, value.Float64(), style)
-	case slog.KindTime:
-		e.writeColoredTime(buf, value.Time(), e.h.opts.TimeFormat, style)
-	case slog.KindUint64:
-		e.writeColoredUint(buf, value.Uint64(), style)
-	case slog.KindDuration:
-		e.writeColoredDuration(buf, value.Duration(), style)
-	case slog.KindAny:
-		switch v := value.Any().(type) {
-		case error:
-			if _, ok := v.(fmt.Formatter); ok {
-				e.withColor(buf, style, func() {
-					fmt.Fprintf(buf, "%+v", v)
-				})
-			} else {
-				e.writeColoredString(buf, v.Error(), style)
-			}
-			return
-		case fmt.Stringer:
-			e.writeColoredString(buf, v.String(), style)
-			return
-		case *slog.Source:
-			e.withColor(buf, style, func() {
-				buf.AppendString(trimmedPath(v.File, cwd))
-				buf.AppendByte(':')
-				buf.AppendInt(int64(v.Line))
-			})
-			return
-		}
-		fallthrough
-	case slog.KindString:
-		fallthrough
-	default:
-		e.writeColoredString(buf, value.String(), style)
-	}
+	e.withColor(buf, style, func() {
+		e.writeValue(buf, value)
+	})
 }
 
-func (e *encoder) writeLevel(buf *buffer, l slog.Level) {
+func (e *encoder) writeLevel(buf *buffer, l slog.Level, abbreviated bool) {
 	var val slog.Value
 	var writeVal bool
 
@@ -430,22 +353,37 @@ func (e *encoder) writeLevel(buf *buffer, l slog.Level) {
 	case l >= slog.LevelError:
 		style = e.h.opts.Theme.LevelError()
 		str = "ERR"
+		if !abbreviated {
+			str = "ERROR"
+		}
 		delta = int(l - slog.LevelError)
 	case l >= slog.LevelWarn:
 		style = e.h.opts.Theme.LevelWarn()
 		str = "WRN"
+		if !abbreviated {
+			str = "WARN"
+		}
 		delta = int(l - slog.LevelWarn)
 	case l >= slog.LevelInfo:
 		style = e.h.opts.Theme.LevelInfo()
 		str = "INF"
+		if !abbreviated {
+			str = "INFO"
+		}
 		delta = int(l - slog.LevelInfo)
 	case l >= slog.LevelDebug:
 		style = e.h.opts.Theme.LevelDebug()
 		str = "DBG"
+		if !abbreviated {
+			str = "DEBUG"
+		}
 		delta = int(l - slog.LevelDebug)
 	default:
 		style = e.h.opts.Theme.LevelDebug()
 		str = "DBG"
+		if !abbreviated {
+			str = "DEBUG"
+		}
 		delta = int(l - slog.LevelDebug)
 	}
 	if writeVal {
@@ -456,7 +394,6 @@ func (e *encoder) writeLevel(buf *buffer, l slog.Level) {
 		}
 		e.writeColoredString(buf, str, style)
 	}
-	buf.AppendByte(' ')
 }
 
 func trimmedPath(path string, cwd string, truncate int) string {
@@ -487,10 +424,10 @@ func trimmedPath(path string, cwd string, truncate int) string {
 
 	var start int
 	for idx := len(path); truncate > 0; truncate-- {
-	idx = strings.LastIndexByte(path[:idx], '/')
-	if idx == -1 {
+		idx = strings.LastIndexByte(path[:idx], '/')
+		if idx == -1 {
 			break
-	}
+		}
 		start = idx + 1
 	}
 	return path[start:]

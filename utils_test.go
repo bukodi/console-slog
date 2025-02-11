@@ -16,7 +16,7 @@ func AssertZero[E comparable](t *testing.T, v E) {
 func AssertEqual[E comparable](t *testing.T, expected, value E) {
 	t.Helper()
 	if expected != value {
-		t.Errorf("expected %v, got %v", expected, value)
+		t.Errorf("\nexpected: %v\n     got: %v", expected, value)
 	}
 }
 

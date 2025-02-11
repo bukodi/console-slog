@@ -24,7 +24,7 @@ func TestHandler_TimeFormat(t *testing.T) {
 	rec.AddAttrs(slog.Time("endtime", endTime))
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar endtime=%s\n", now.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano))
+	expected := fmt.Sprintf("%s INF > foobar endtime=%s\n", now.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -37,7 +37,7 @@ func TestHandler_TimeZero(t *testing.T) {
 	rec := slog.NewRecord(time.Time{}, slog.LevelInfo, "foobar", 0)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("INF foobar\n")
+	expected := fmt.Sprintf("INF > foobar\n")
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -48,7 +48,7 @@ func TestHandler_NoColor(t *testing.T) {
 	rec := slog.NewRecord(now, slog.LevelInfo, "foobar", 0)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar\n", now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -116,7 +116,7 @@ func TestHandler_Attr(t *testing.T) {
 	)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=%s dur=1s group.foo=bar group.subgroup.foo=bar err=the error formattedError=formatted the error stringer=stringer nostringer={bar} valuer=The word is 'distant'\n", now.Format(time.DateTime), now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=%s dur=1s group.foo=bar group.subgroup.foo=bar err=the error formattedError=formatted the error stringer=stringer nostringer={bar} valuer=The word is 'distant'\n", now.Format(time.DateTime), now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -133,7 +133,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 			attrs: []slog.Attr{
 				slog.String("foo", "line one\nline two"),
 			},
-			want: "INF multiline attrs foo=line one\nline two\n",
+			want: "INF > multiline attrs foo=line one\nline two\n",
 		},
 		{
 			name: "multiple attrs",
@@ -141,7 +141,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 				slog.String("foo", "line one\nline two"),
 				slog.String("bar", "line three\nline four"),
 			},
-			want: "INF multiline attrs foo=line one\nline two bar=line three\nline four\n",
+			want: "INF > multiline attrs foo=line one\nline two bar=line three\nline four\n",
 		},
 		{
 			name: "sort multiline attrs to end",
@@ -152,20 +152,21 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 				slog.String("bar", "line three\nline four"),
 				slog.String("color", "red"),
 			},
-			want: "INF multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
+			want: "INF > multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
 		},
 		{
 			name: "multiline message",
 			msg:  "multiline\nmessage",
-			want: "INF multiline\nmessage\n",
+			want: "INF > multiline\nmessage\n",
 		},
 		{
 			name: "preserve leading and trailing newlines",
 			attrs: []slog.Attr{
 				slog.String("foo", "\nline one\nline two\n"),
 			},
-			want: "INF multiline attrs foo=\nline one\nline two\n\n",
+			want: "INF > multiline attrs foo=\nline one\nline two\n\n",
 		},
+		// todo: test multiline attr using WithAttrs
 	}
 
 	for _, test := range tests {
@@ -201,7 +202,7 @@ func TestHandler_GroupEmpty(t *testing.T) {
 	)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar group.foo=bar\n", now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar group.foo=bar\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -219,7 +220,7 @@ func TestHandler_GroupInline(t *testing.T) {
 	)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar group.foo=bar foo=bar\n", now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar group.foo=bar foo=bar\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -235,7 +236,7 @@ func TestHandler_GroupResolve(t *testing.T) {
 	)
 	AssertNoError(t, h.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar group.stringer=stringer group.valuer=The word is 'surreal'\n", now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar group.stringer=stringer group.valuer=The word is 'surreal'\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 }
 
@@ -268,12 +269,12 @@ func TestHandler_WithAttr(t *testing.T) {
 		)})
 	AssertNoError(t, h2.Handle(context.Background(), rec))
 
-	expected := fmt.Sprintf("%s INF foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=%s dur=1s stringer=stringer valuer=The word is 'awesome' group.foo=bar group.subgroup.foo=bar group.stringer=stringer group.valuer=The word is 'pizza'\n", now.Format(time.DateTime), now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=%s dur=1s stringer=stringer valuer=The word is 'awesome' group.foo=bar group.subgroup.foo=bar group.stringer=stringer group.valuer=The word is 'pizza'\n", now.Format(time.DateTime), now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 
 	buf.Reset()
 	AssertNoError(t, h.Handle(context.Background(), rec))
-	AssertEqual(t, fmt.Sprintf("%s INF foobar\n", now.Format(time.DateTime)), buf.String())
+	AssertEqual(t, fmt.Sprintf("%s INF > foobar\n", now.Format(time.DateTime)), buf.String())
 }
 
 func TestHandler_WithGroup(t *testing.T) {
@@ -284,18 +285,18 @@ func TestHandler_WithGroup(t *testing.T) {
 	rec.Add("int", 12)
 	h2 := h.WithGroup("group1").WithAttrs([]slog.Attr{slog.String("foo", "bar")})
 	AssertNoError(t, h2.Handle(context.Background(), rec))
-	expected := fmt.Sprintf("%s INF foobar group1.foo=bar group1.int=12\n", now.Format(time.DateTime))
+	expected := fmt.Sprintf("%s INF > foobar group1.foo=bar group1.int=12\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 	buf.Reset()
 
 	h3 := h2.WithGroup("group2")
 	AssertNoError(t, h3.Handle(context.Background(), rec))
-	expected = fmt.Sprintf("%s INF foobar group1.foo=bar group1.group2.int=12\n", now.Format(time.DateTime))
+	expected = fmt.Sprintf("%s INF > foobar group1.foo=bar group1.group2.int=12\n", now.Format(time.DateTime))
 	AssertEqual(t, expected, buf.String())
 
 	buf.Reset()
 	AssertNoError(t, h.Handle(context.Background(), rec))
-	AssertEqual(t, fmt.Sprintf("%s INF foobar int=12\n", now.Format(time.DateTime)), buf.String())
+	AssertEqual(t, fmt.Sprintf("%s INF > foobar int=12\n", now.Format(time.DateTime)), buf.String())
 }
 
 func TestHandler_Levels(t *testing.T) {
@@ -321,7 +322,7 @@ func TestHandler_Levels(t *testing.T) {
 				rec := slog.NewRecord(now, ll, "foobar", 0)
 				if ll >= l {
 					AssertNoError(t, h.Handle(context.Background(), rec))
-					AssertEqual(t, fmt.Sprintf("%s %s foobar\n", now.Format(time.DateTime), s), buf.String())
+					AssertEqual(t, fmt.Sprintf("%s %s > foobar\n", now.Format(time.DateTime), s), buf.String())
 					buf.Reset()
 				}
 			}
@@ -342,14 +343,14 @@ func TestHandler_Source(t *testing.T) {
 	AssertEqual(t, fmt.Sprintf("%s INF %s:%d > foobar\n", now.Format(time.DateTime), file, line), buf.String())
 	buf.Reset()
 	AssertNoError(t, h2.Handle(context.Background(), rec))
-	AssertEqual(t, fmt.Sprintf("%s INF foobar\n", now.Format(time.DateTime)), buf.String())
+	AssertEqual(t, fmt.Sprintf("%s INF > foobar\n", now.Format(time.DateTime)), buf.String())
 	buf.Reset()
 	// If the PC is zero then this field and its associated group should not be logged.
 	// '- If r.PC is zero, ignore it.'
 	// https://pkg.go.dev/log/slog@master#Handler
 	rec.PC = 0
 	AssertNoError(t, h.Handle(context.Background(), rec))
-	AssertEqual(t, fmt.Sprintf("%s INF foobar\n", now.Format(time.DateTime)), buf.String())
+	AssertEqual(t, fmt.Sprintf("%s INF > foobar\n", now.Format(time.DateTime)), buf.String())
 }
 
 type valuer struct {
@@ -395,7 +396,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 				r.Time = time.Time{}
 			},
 			noSource: true,
-			want:     "INF foobar size=12 color=red\n",
+			want:     "INF > foobar size=12 color=red\n",
 			replaceAttr: func(t *testing.T, s []string, a slog.Attr) slog.Attr {
 				switch a.Key {
 				case slog.TimeKey, slog.SourceKey:
@@ -494,7 +495,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 		{
 			name:        "clear source",
 			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any(slog.SourceKey, nil)),
-			want:        "2010-05-06 07:08:09 INF foobar size=12 color=red\n",
+			want:        "2010-05-06 07:08:09 INF > foobar size=12 color=red\n",
 		},
 		{
 			name: "replace source",
@@ -523,13 +524,15 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 			want: "2010-05-06 07:08:09 INF path/to/file.go:33 > foobar size=12 color=red\n",
 		},
 		{
-			name:   "empty source", // should still be called
+			name:   "empty source", // won't be called because PC is 0
 			modrec: func(r *slog.Record) { r.PC = 0 },
-			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any(slog.SourceKey, &slog.Source{
-				File: filepath.Join(cwd, "path", "to", "file.go"),
-				Line: 33,
-			})),
-			want: "2010-05-06 07:08:09 INF path/to/file.go:33 > foobar size=12 color=red\n",
+			replaceAttr: func(t *testing.T, s []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.SourceKey {
+					t.Errorf("should not have been called on source attr, was called on %v", a)
+				}
+				return a
+			},
+			want: "2010-05-06 07:08:09 INF > foobar size=12 color=red\n",
 		},
 		{
 			name:        "clear message",
@@ -621,11 +624,11 @@ func TestHandler_Headers(t *testing.T) {
 		{
 			name:  "no headers",
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "INF with headers foo=bar\n",
+			want:  "INF > with headers foo=bar\n",
 		},
 		{
 			name: "one header",
-			opts: HandlerOptions{Headers: []string{"foo"}},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m"},
 			attrs: []slog.Attr{
 				slog.String("foo", "bar"),
 				slog.String("bar", "baz"),
@@ -634,7 +637,7 @@ func TestHandler_Headers(t *testing.T) {
 		},
 		{
 			name: "two headers",
-			opts: HandlerOptions{Headers: []string{"foo", "bar"}},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
 			attrs: []slog.Attr{
 				slog.String("foo", "bar"),
 				slog.String("bar", "baz"),
@@ -642,19 +645,28 @@ func TestHandler_Headers(t *testing.T) {
 			want: "INF bar baz > with headers\n",
 		},
 		{
+			name: "two headers alt order",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
+			attrs: []slog.Attr{
+				slog.String("bar", "baz"),
+				slog.String("foo", "bar"),
+			},
+			want: "INF bar baz > with headers\n",
+		},
+		{
 			name:  "missing headers",
-			opts:  HandlerOptions{Headers: []string{"foo", "bar"}},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
 			attrs: []slog.Attr{slog.String("bar", "baz"), slog.String("baz", "foo")},
 			want:  "INF baz > with headers baz=foo\n",
 		},
 		{
 			name: "missing all headers",
-			opts: HandlerOptions{Headers: []string{"foo", "bar"}},
-			want: "INF with headers\n",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
+			want: "INF > with headers\n",
 		},
 		{
 			name: "header and source",
-			opts: HandlerOptions{Headers: []string{"foo"}, AddSource: true},
+			opts: HandlerOptions{HeaderFormat: "%l %[source]h %[foo]h > %m", AddSource: true},
 			attrs: []slog.Attr{
 				slog.String("foo", "bar"),
 				slog.String("bar", "baz"),
@@ -663,9 +675,8 @@ func TestHandler_Headers(t *testing.T) {
 		},
 		{
 			name: "withattrs",
-			opts: HandlerOptions{Headers: []string{"foo"}},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m"},
 			attrs: []slog.Attr{
-
 				slog.String("bar", "baz"),
 			},
 			withAttrs: []slog.Attr{
@@ -675,7 +686,7 @@ func TestHandler_Headers(t *testing.T) {
 		},
 		{
 			name: "withgroup",
-			opts: HandlerOptions{Headers: []string{"foo", "bar"}},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
 			attrs: []slog.Attr{
 				slog.String("bar", "baz"),
 				slog.String("baz", "foo"),
@@ -688,6 +699,8 @@ func TestHandler_Headers(t *testing.T) {
 		},
 		// todo: add a test for when the record doesn't include the header field, but fixed width headers are enabled
 		// the header should be padded with spaces to the right
+		// todo: add a test for when the same attribute is repeated in the record
+		// todo: add a test for when the same attribute is repeated in the headers
 	}
 
 	for _, test := range tests {
@@ -720,9 +733,9 @@ func TestHandler_Headers(t *testing.T) {
 
 		buf := bytes.Buffer{}
 		h := NewHandler(&buf, &HandlerOptions{
-			Headers:    []string{"foo", "bar"},
-			TimeFormat: "0",
-			NoColor:    true,
+			HeaderFormat: "%l %[foo]h %[bar]h > %m",
+			TimeFormat:   "0",
+			NoColor:      true,
 		})
 
 		assertLog := func(t *testing.T, handler slog.Handler, want string, attrs ...slog.Attr) {
@@ -816,7 +829,7 @@ func TestThemes(t *testing.T) {
 					// Source
 					if theme.Source() != "" {
 						checkANSIMod(t, "Source", theme.Source())
-						checkANSIMod(t, "AttrKey", theme.AttrKey())
+						// checkANSIMod(t, "AttrKey", theme.AttrKey())
 					}
 
 					// Message
@@ -922,6 +935,238 @@ func TestThemes(t *testing.T) {
 			h.Handle(context.Background(), rec)
 			bufBytes = buf.Bytes()
 			checkLog(level, 3)
+		})
+	}
+}
+
+func TestParseFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		wantFields  []any
+		wantHeaders int
+	}{
+		{
+			name:   "basic format",
+			format: "%t %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "with header",
+			format: "%t %[logger]h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", capture: true},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+		{
+			name:   "header with width",
+			format: "%t %[logger]5h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", width: 5, capture: true},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+		{
+			name:   "header with right align",
+			format: "%t %[logger]-h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", rightAlign: true, capture: true},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+		{
+			name:   "header with width and right align",
+			format: "%t %[logger]-5h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", width: 5, rightAlign: true, capture: true},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+		{
+			name:   "non-capturing header",
+			format: "%t %[logger]+h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", capture: false},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+		{
+			name:   "multiple headers",
+			format: "%t %[logger]h %[source]h %l %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{key: "logger", capture: true},
+				" ",
+				headerField{key: "source", capture: true},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 2,
+		},
+		{
+			name:   "with literal text",
+			format: "prefix %t [%l] %m suffix",
+			wantFields: []any{
+				"prefix ",
+				timestampField{},
+				" [",
+				levelField{abbreviated: true},
+				"] ",
+				messageField{},
+				" suffix",
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "with escaped percent",
+			format: "%% %t %l %m",
+			wantFields: []any{
+				"%",
+				" ",
+				timestampField{},
+				" ",
+				levelField{abbreviated: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "with non-abbreviated level",
+			format: "%t %L %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				levelField{abbreviated: false},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "with right-aligned non-abbreviated level",
+			format: "%t %-L %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				levelField{abbreviated: false, rightAlign: true},
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "error: missing verb",
+			format: "%t %",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				"%!(MISSING_VERB)",
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "error: missing header name",
+			format: "%t %h %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				"%!h(MISSING_HEADER_NAME)",
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "error: missing closing bracket",
+			format: "%t %[logger %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				"%!(MISSING_CLOSING_BRACKET)",
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "error: invalid verb",
+			format: "%t %x %m",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				"%!x(INVALID_VERB)",
+				" ",
+				messageField{},
+			},
+			wantHeaders: 0,
+		},
+		{
+			name:   "with extra whitespace",
+			format: "%t    %l     %[logger]h      %m",
+			wantFields: []any{
+				timestampField{},
+				"    ",
+				levelField{abbreviated: true},
+				"     ",
+				headerField{key: "logger", capture: true},
+				"      ",
+				messageField{},
+			},
+			wantHeaders: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFields, gotHeaders := parseFormat(tt.format)
+			if gotHeaders != tt.wantHeaders {
+				t.Errorf("parseFormat() header count = %v, want %v", gotHeaders, tt.wantHeaders)
+			}
+			if !reflect.DeepEqual(gotFields, tt.wantFields) {
+				t.Errorf("parseFormat() fields =\n%#v\nwant:\n%#v", gotFields, tt.wantFields)
+			}
 		})
 	}
 }

@@ -153,12 +153,12 @@ func NewBrightTheme() Theme {
 func NewDimTheme() Theme {
 	return ThemeDef{
 		name:           "Dim",
-		timestamp:      ToANSICode(BrightBlack),
-		source:         ToANSICode(Bold, BrightBlack),
+		timestamp:      ToANSICode(Faint),
+		source:         ToANSICode(Bold, Faint),
 		message:        ToANSICode(Bold),
-		messageDebug:   ToANSICode(),
-		attrKey:        ToANSICode(Cyan),
-		attrValue:      ToANSICode(BrightBlack),
+		messageDebug:   ToANSICode(Bold),
+		attrKey:        ToANSICode(Faint, Cyan),
+		attrValue:      ToANSICode(Faint),
 		attrValueError: ToANSICode(Bold, Red),
 		levelError:     ToANSICode(Bold, Red),
 		levelWarn:      ToANSICode(Bold, Yellow),

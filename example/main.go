@@ -17,7 +17,7 @@ func main() {
 			TruncateSourcePath: 2,
 			TimeFormat:         "15:04:05.000",
 			HeaderWidth:        15,
-			Theme: console.NewDimTheme(),
+			Theme:              console.NewDimTheme(),
 		}),
 	)
 	slog.SetDefault(logger)
