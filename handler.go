@@ -1,7 +1,6 @@
 package console
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -158,64 +157,6 @@ func (h *Handler) Enabled(_ context.Context, l slog.Level) bool {
 	return l >= h.opts.Level.Level()
 }
 
-func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
-	offset := e.attrBuf.Len()
-	e.writeAttr(&e.attrBuf, a, groupPrefix)
-
-	// check if the last attr written has newlines in it
-	// if so, move it to the trailerBuf
-	lastAttr := e.attrBuf[offset:]
-	if bytes.IndexByte(lastAttr, '\n') >= 0 {
-		// todo: consider splitting the key and the value
-		// components, so the `key=` can be printed on its
-		// own line, and the value will not share any of its
-		// lines with anything else.  Like:
-		//
-		// INF msg key1=val1
-		// key2=
-		// val2 line 1
-		// val2 line 2
-		// key3=
-		// val3 line 1
-		// val3 line 2
-		//
-		// and maybe consider printing the key for these values
-		// differently, like:
-		//
-		// === key2 ===
-		// val2 line1
-		// val2 line2
-		// === key3 ===
-		// val3 line 1
-		// val3 line 2
-		//
-		// Splitting the key and value doesn't work up here in
-		// Handle() though, because we don't know where the term
-		// control characters are.  Would need to push this
-		// multiline handling deeper into encoder, or pass
-		// offsets back up from writeAttr()
-		//
-		// if k, v, ok := bytes.Cut(lastAttr, []byte("=")); ok {
-		// trailerBuf.AppendString("=== ")
-		// trailerBuf.Append(k[1:])
-		// trailerBuf.AppendString(" ===\n")
-		// trailerBuf.AppendByte('=')
-		// trailerBuf.AppendByte('\n')
-		// trailerBuf.AppendString("---------------------\n")
-		// trailerBuf.Append(v)
-		// trailerBuf.AppendString("\n---------------------\n")
-		// trailerBuf.AppendByte('\n')
-		// } else {
-		// trailerBuf.Append(lastAttr[1:])
-		// trailerBuf.AppendByte('\n')
-		// }
-		e.multilineAttrBuf.Append(lastAttr)
-
-		// rewind the middle buffer
-		e.attrBuf = e.attrBuf[:offset]
-	}
-}
-
 func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	enc := newEncoder(h)
 
@@ -257,15 +198,15 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			if headerAttrs[headerIdx].Equal(slog.Attr{}) && f.memo != "" {
 				enc.buf.AppendString(f.memo)
 			} else {
-				enc.writeHeader(&enc.buf, headerAttrs[headerIdx], f.width, f.rightAlign)
+				enc.encodeHeader(headerAttrs[headerIdx], f.width, f.rightAlign)
 			}
 			headerIdx++
 		case levelField:
-			enc.writeLevel(&enc.buf, rec.Level, f.abbreviated)
+			enc.encodeLevel(rec.Level, f.abbreviated)
 		case messageField:
-			enc.writeMessage(&enc.buf, rec.Level, rec.Message)
+			enc.encodeMessage(rec.Level, rec.Message)
 		case timestampField:
-			enc.writeTimestamp(&enc.buf, rec.Time)
+			enc.encodeTimestamp(rec.Time)
 		case string:
 			// todo: need to color these strings
 			// todo: can we generalize this to some form of grouping?
@@ -286,7 +227,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	// log line is written in a single Write call
 	enc.buf.copy(&enc.attrBuf)
 	enc.buf.copy(&enc.multilineAttrBuf)
-	enc.NewLine(&enc.buf)
+	enc.buf.AppendByte('\n')
 
 	if _, err := enc.buf.WriteTo(h.out); err != nil {
 		return err
@@ -298,10 +239,10 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 
 // WithAttrs implements slog.Handler.
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	// todo: reuse the encode for memoization
-	attrs, fields := h.memoizeHeaders(attrs)
-
 	enc := newEncoder(h)
+
+	attrs, fields := h.memoizeHeaders(enc, attrs)
+
 	for _, a := range attrs {
 		enc.encodeAttr(h.groupPrefix, a)
 	}
@@ -316,6 +257,8 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		newMultiCtx = append(newMultiCtx, enc.multilineAttrBuf...)
 		newMultiCtx.Clip()
 	}
+
+	enc.free()
 
 	return &Handler{
 		opts:             h.opts,
@@ -347,10 +290,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func (h *Handler) memoizeHeaders(attrs []slog.Attr) ([]slog.Attr, []any) {
-	enc := newEncoder(h)
-	defer enc.free()
-	buf := &enc.buf
+func (h *Handler) memoizeHeaders(enc *encoder, attrs []slog.Attr) ([]slog.Attr, []any) {
 	newFields := make([]any, len(h.fields))
 	copy(newFields, h.fields)
 	remainingAttrs := make([]slog.Attr, 0, len(attrs))
@@ -360,9 +300,9 @@ func (h *Handler) memoizeHeaders(attrs []slog.Attr) ([]slog.Attr, []any) {
 		for i, field := range h.fields {
 			if headerField, ok := field.(headerField); ok {
 				if headerField.key == attr.Key {
-					buf.Reset()
-					enc.writeHeader(buf, attr, headerField.width, headerField.rightAlign)
-					headerField.memo = buf.String()
+					enc.buf.Reset()
+					enc.encodeHeader(attr, headerField.width, headerField.rightAlign)
+					headerField.memo = enc.buf.String()
 					newFields[i] = headerField
 					if headerField.capture {
 						capture = true

@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -50,33 +51,7 @@ func (e *encoder) free() {
 	encoderPool.Put(e)
 }
 
-func (e *encoder) NewLine(buf *buffer) {
-	buf.AppendByte('\n')
-}
-
-func (e *encoder) withColor(b *buffer, c ANSIMod, f func()) {
-	if c == "" || e.h.opts.NoColor {
-		f()
-		return
-	}
-	b.AppendString(string(c))
-	f()
-	b.AppendString(string(ResetMod))
-}
-
-func (e *encoder) writeColoredTime(w *buffer, t time.Time, format string, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendTime(t, format)
-	})
-}
-
-func (e *encoder) writeColoredString(w *buffer, s string, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendString(s)
-	})
-}
-
-func (e *encoder) writeTimestamp(buf *buffer, tt time.Time) {
+func (e *encoder) encodeTimestamp(tt time.Time) {
 	if tt.IsZero() {
 		// elide, and skip ReplaceAttr
 		return
@@ -94,7 +69,7 @@ func (e *encoder) writeTimestamp(buf *buffer, tt time.Time) {
 		if attr.Value.Kind() != slog.KindTime {
 			// handle all non-time values by printing them like
 			// an attr value
-			e.writeColoredValue(buf, attr.Value, e.h.opts.Theme.Timestamp())
+			e.writeColoredValue(&e.buf, attr.Value, e.h.opts.Theme.Timestamp())
 			return
 		}
 
@@ -106,10 +81,12 @@ func (e *encoder) writeTimestamp(buf *buffer, tt time.Time) {
 		}
 	}
 
-	e.writeColoredTime(buf, tt, e.h.opts.TimeFormat, e.h.opts.Theme.Timestamp())
+	e.withColor(&e.buf, e.h.opts.Theme.Timestamp(), func() {
+		e.buf.AppendTime(tt, e.h.opts.TimeFormat)
+	})
 }
 
-func (e *encoder) writeMessage(buf *buffer, level slog.Level, msg string) {
+func (e *encoder) encodeMessage(level slog.Level, msg string) {
 	style := e.h.opts.Theme.Message()
 	if level < slog.LevelInfo {
 		style = e.h.opts.Theme.MessageDebug()
@@ -123,14 +100,14 @@ func (e *encoder) writeMessage(buf *buffer, level slog.Level, msg string) {
 			return
 		}
 
-		e.writeColoredValue(buf, attr.Value, style)
+		e.writeColoredValue(&e.buf, attr.Value, style)
 		return
 	}
 
-	e.writeColoredString(buf, msg, style)
+	e.writeColoredString(&e.buf, msg, style)
 }
 
-func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int, rightAlign bool) {
+func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {
 	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
 		a = e.h.opts.ReplaceAttr(nil, a)
 		a.Value = a.Value.Resolve()
@@ -138,141 +115,46 @@ func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int, rightAlign boo
 	if a.Value.Equal(slog.Value{}) {
 		// just pad as needed
 		if width > 0 {
-			buf.Pad(width, ' ')
+			e.buf.Pad(width, ' ')
 		}
 		return
 	}
 
-	e.withColor(buf, e.h.opts.Theme.Source(), func() {
-		l := buf.Len()
-		e.writeValue(buf, a.Value)
+	e.withColor(&e.buf, e.h.opts.Theme.Source(), func() {
+		l := e.buf.Len()
+		e.writeValue(&e.buf, a.Value)
 		if width <= 0 {
 			return
 		}
 		// truncate or pad to required width
-		remainingWidth := l + width - buf.Len()
+		remainingWidth := l + width - e.buf.Len()
 		if remainingWidth < 0 {
 			// truncate
-			buf.Truncate(l + width)
+			e.buf.Truncate(l + width)
 		} else if remainingWidth > 0 {
 			if rightAlign {
 				// For right alignment, shift the text right in-place:
 				// 1. Get the text length
-				textLen := buf.Len() - l
+				textLen := e.buf.Len() - l
 				// 2. Add padding to reach final width
-				buf.Pad(remainingWidth, ' ')
+				e.buf.Pad(remainingWidth, ' ')
 				// 3. Move the text to the right by copying from end to start
 				for i := 0; i < textLen; i++ {
-					(*buf)[buf.Len()-1-i] = (*buf)[l+textLen-1-i]
+					e.buf[e.buf.Len()-1-i] = e.buf[l+textLen-1-i]
 				}
 				// 4. Fill the left side with spaces
 				for i := 0; i < remainingWidth; i++ {
-					(*buf)[l+i] = ' '
+					e.buf[l+i] = ' '
 				}
 			} else {
 				// Left align - just pad with spaces
-				buf.Pad(remainingWidth, ' ')
+				e.buf.Pad(remainingWidth, ' ')
 			}
 		}
 	})
 }
 
-func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
-	a.Value = a.Value.Resolve()
-	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
-		a = e.h.opts.ReplaceAttr(e.groups, a)
-		a.Value = a.Value.Resolve()
-	}
-	// Elide empty Attrs.
-	if a.Equal(slog.Attr{}) {
-		return
-	}
-
-	value := a.Value
-
-	if value.Kind() == slog.KindGroup {
-		subgroup := a.Key
-		if group != "" {
-			subgroup = group + "." + a.Key
-		}
-		if e.h.opts.ReplaceAttr != nil {
-			e.groups = append(e.groups, a.Key)
-		}
-		for _, attr := range value.Group() {
-			e.writeAttr(buf, attr, subgroup)
-		}
-		if e.h.opts.ReplaceAttr != nil {
-			e.groups = e.groups[:len(e.groups)-1]
-		}
-		return
-	}
-
-	buf.AppendByte(' ')
-	e.withColor(buf, e.h.opts.Theme.AttrKey(), func() {
-		if group != "" {
-			buf.AppendString(group)
-			buf.AppendByte('.')
-		}
-		buf.AppendString(a.Key)
-		buf.AppendByte('=')
-	})
-
-	style := e.h.opts.Theme.AttrValue()
-	if value.Kind() == slog.KindAny {
-		if _, ok := value.Any().(error); ok {
-			style = e.h.opts.Theme.AttrValueError()
-		}
-	}
-	e.writeColoredValue(buf, value, style)
-}
-
-func (e *encoder) writeValue(buf *buffer, value slog.Value) {
-	switch value.Kind() {
-	case slog.KindInt64:
-		buf.AppendInt(value.Int64())
-	case slog.KindBool:
-		buf.AppendBool(value.Bool())
-	case slog.KindFloat64:
-		buf.AppendFloat(value.Float64())
-	case slog.KindTime:
-		buf.AppendTime(value.Time(), e.h.opts.TimeFormat)
-	case slog.KindUint64:
-		buf.AppendUint(value.Uint64())
-	case slog.KindDuration:
-		buf.AppendDuration(value.Duration())
-	case slog.KindAny:
-		switch v := value.Any().(type) {
-		case error:
-			if _, ok := v.(fmt.Formatter); ok {
-				fmt.Fprintf(buf, "%+v", v)
-			} else {
-				buf.AppendString(v.Error())
-			}
-			return
-		case fmt.Stringer:
-			buf.AppendString(v.String())
-			return
-		case *slog.Source:
-			buf.AppendString(trimmedPath(v.File, cwd, e.h.opts.TruncateSourcePath))
-			buf.AppendByte(':')
-			buf.AppendInt(int64(v.Line))
-			return
-		}
-		fallthrough
-	case slog.KindString:
-		fallthrough
-	default:
-		buf.AppendString(value.String())
-	}
-}
-
-func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod) {
-	e.withColor(buf, style, func() {
-		e.writeValue(buf, value)
-	})
-}
-
-func (e *encoder) writeLevel(buf *buffer, l slog.Level, abbreviated bool) {
+func (e *encoder) encodeLevel(l slog.Level, abbreviated bool) {
 	var val slog.Value
 	var writeVal bool
 
@@ -339,13 +221,182 @@ func (e *encoder) writeLevel(buf *buffer, l slog.Level, abbreviated bool) {
 		delta = int(l - slog.LevelDebug)
 	}
 	if writeVal {
-		e.writeColoredValue(buf, val, style)
+		e.writeColoredValue(&e.buf, val, style)
 	} else {
 		if delta != 0 {
 			str = fmt.Sprintf("%s%+d", str, delta)
 		}
-		e.writeColoredString(buf, str, style)
+		e.writeColoredString(&e.buf, str, style)
 	}
+}
+
+func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
+	offset := e.attrBuf.Len()
+	e.writeAttr(&e.attrBuf, a, groupPrefix)
+
+	// check if the last attr written has newlines in it
+	// if so, move it to the trailerBuf
+	lastAttr := e.attrBuf[offset:]
+	if bytes.IndexByte(lastAttr, '\n') >= 0 {
+		// todo: consider splitting the key and the value
+		// components, so the `key=` can be printed on its
+		// own line, and the value will not share any of its
+		// lines with anything else.  Like:
+		//
+		// INF msg key1=val1
+		// key2=
+		// val2 line 1
+		// val2 line 2
+		// key3=
+		// val3 line 1
+		// val3 line 2
+		//
+		// and maybe consider printing the key for these values
+		// differently, like:
+		//
+		// === key2 ===
+		// val2 line1
+		// val2 line2
+		// === key3 ===
+		// val3 line 1
+		// val3 line 2
+		//
+		// Splitting the key and value doesn't work up here in
+		// Handle() though, because we don't know where the term
+		// control characters are.  Would need to push this
+		// multiline handling deeper into encoder, or pass
+		// offsets back up from writeAttr()
+		//
+		// if k, v, ok := bytes.Cut(lastAttr, []byte("=")); ok {
+		// trailerBuf.AppendString("=== ")
+		// trailerBuf.Append(k[1:])
+		// trailerBuf.AppendString(" ===\n")
+		// trailerBuf.AppendByte('=')
+		// trailerBuf.AppendByte('\n')
+		// trailerBuf.AppendString("---------------------\n")
+		// trailerBuf.Append(v)
+		// trailerBuf.AppendString("\n---------------------\n")
+		// trailerBuf.AppendByte('\n')
+		// } else {
+		// trailerBuf.Append(lastAttr[1:])
+		// trailerBuf.AppendByte('\n')
+		// }
+		e.multilineAttrBuf.Append(lastAttr)
+
+		// rewind the middle buffer
+		e.attrBuf = e.attrBuf[:offset]
+	}
+}
+
+func (e *encoder) withColor(b *buffer, c ANSIMod, f func()) {
+	if c == "" || e.h.opts.NoColor {
+		f()
+		return
+	}
+	b.AppendString(string(c))
+	f()
+	b.AppendString(string(ResetMod))
+}
+
+func (e *encoder) writeColoredString(w *buffer, s string, c ANSIMod) {
+	e.withColor(w, c, func() {
+		w.AppendString(s)
+	})
+}
+
+func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
+	a.Value = a.Value.Resolve()
+	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
+		a = e.h.opts.ReplaceAttr(e.groups, a)
+		a.Value = a.Value.Resolve()
+	}
+	// Elide empty Attrs.
+	if a.Equal(slog.Attr{}) {
+		return
+	}
+
+	value := a.Value
+
+	if value.Kind() == slog.KindGroup {
+		subgroup := a.Key
+		if group != "" {
+			subgroup = group + "." + a.Key
+		}
+		if e.h.opts.ReplaceAttr != nil {
+			e.groups = append(e.groups, a.Key)
+		}
+		for _, attr := range value.Group() {
+			e.writeAttr(buf, attr, subgroup)
+		}
+		if e.h.opts.ReplaceAttr != nil {
+			e.groups = e.groups[:len(e.groups)-1]
+		}
+		return
+	}
+
+	buf.AppendByte(' ')
+	e.withColor(buf, e.h.opts.Theme.AttrKey(), func() {
+		if group != "" {
+			e.attrBuf.AppendString(group)
+			e.attrBuf.AppendByte('.')
+		}
+		e.attrBuf.AppendString(a.Key)
+		e.attrBuf.AppendByte('=')
+	})
+
+	style := e.h.opts.Theme.AttrValue()
+	if value.Kind() == slog.KindAny {
+		if _, ok := value.Any().(error); ok {
+			style = e.h.opts.Theme.AttrValueError()
+		}
+	}
+	e.writeColoredValue(buf, value, style)
+}
+
+func (e *encoder) writeValue(buf *buffer, value slog.Value) {
+	switch value.Kind() {
+	case slog.KindInt64:
+		buf.AppendInt(value.Int64())
+	case slog.KindBool:
+		buf.AppendBool(value.Bool())
+	case slog.KindFloat64:
+		buf.AppendFloat(value.Float64())
+	case slog.KindTime:
+		buf.AppendTime(value.Time(), e.h.opts.TimeFormat)
+	case slog.KindUint64:
+		buf.AppendUint(value.Uint64())
+	case slog.KindDuration:
+		buf.AppendDuration(value.Duration())
+	case slog.KindAny:
+		switch v := value.Any().(type) {
+		case error:
+			if _, ok := v.(fmt.Formatter); ok {
+				fmt.Fprintf(buf, "%+v", v)
+			} else {
+				buf.AppendString(v.Error())
+			}
+			return
+		case fmt.Stringer:
+			buf.AppendString(v.String())
+			return
+		case *slog.Source:
+			buf.AppendString(trimmedPath(v.File, cwd, e.h.opts.TruncateSourcePath))
+			buf.AppendByte(':')
+			buf.AppendInt(int64(v.Line))
+			return
+		}
+		fallthrough
+	case slog.KindString:
+		fallthrough
+	default:
+		buf.AppendString(value.String())
+	}
+}
+
+func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod) {
+	e.withColor(buf, style, func() {
+		e.writeValue(buf, value)
+	})
 }
 
 func trimmedPath(path string, cwd string, truncate int) string {
