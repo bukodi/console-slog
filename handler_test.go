@@ -16,16 +16,55 @@ import (
 )
 
 func TestHandler_TimeFormat(t *testing.T) {
-	buf := bytes.Buffer{}
-	h := NewHandler(&buf, &HandlerOptions{TimeFormat: time.RFC3339Nano, NoColor: true})
-	now := time.Now()
-	rec := slog.NewRecord(now, slog.LevelInfo, "foobar", 0)
-	endTime := now.Add(time.Second)
-	rec.AddAttrs(slog.Time("endtime", endTime))
-	AssertNoError(t, h.Handle(context.Background(), rec))
+	testTime := time.Date(2024, 01, 02, 15, 04, 05, 123456789, time.UTC)
+	tests := []struct {
+		name       string
+		timeFormat string
+		wantFormat string
+	}{
+		{
+			name:       "DateTime",
+			timeFormat: time.DateTime,
+			wantFormat: "2024-01-02 15:04:05",
+		},
+		{
+			name:       "RFC3339Nano",
+			timeFormat: time.RFC3339Nano,
+			wantFormat: "2024-01-02T15:04:05.123456789Z",
+		},
+		{
+			name:       "Kitchen",
+			timeFormat: time.Kitchen,
+			wantFormat: "3:04PM",
+		},
+		{
+			name:       "EmptyFormat",
+			timeFormat: "", // should default to DateTime
+			wantFormat: "2024-01-02 15:04:05",
+		},
+		{
+			name:       "CustomFormat",
+			timeFormat: "2006/01/02 15:04:05.000 MST",
+			wantFormat: "2024/01/02 15:04:05.123 UTC",
+		},
+	}
 
-	expected := fmt.Sprintf("%s INF > foobar endtime=%s\n", now.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano))
-	AssertEqual(t, expected, buf.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			opts := &HandlerOptions{
+				TimeFormat: tt.timeFormat,
+				NoColor:    true,
+			}
+			h := NewHandler(buf, opts)
+			rec := slog.NewRecord(testTime, slog.LevelInfo, "test message", 0)
+			err := h.Handle(context.Background(), rec)
+			AssertNoError(t, err)
+
+			expected := fmt.Sprintf("%s INF > test message\n", testTime.Format(tt.wantFormat))
+			AssertEqual(t, expected, buf.String())
+		})
+	}
 }
 
 // Handlers should not log the time field if it is zero.
@@ -378,6 +417,8 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 
 	awesomeVal := slog.Any("valuer", valuer{slog.StringValue("awesome")})
 
+	awesomeValuer := valuer{slog.StringValue("awesome")}
+
 	tests := []struct {
 		name        string
 		replaceAttr func(*testing.T, []string, slog.Attr) slog.Attr
@@ -507,17 +548,17 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 		},
 		{
 			name:        "replace source with different kind",
-			replaceAttr: replaceAttrWith(slog.SourceKey, slog.String("color", "red")),
+			replaceAttr: replaceAttrWith(slog.SourceKey, slog.String(slog.SourceKey, "red")),
 			want:        "2010-05-06 07:08:09 INF red > foobar size=12 color=red\n",
 		},
 		{
 			name:        "replace source with valuer",
-			replaceAttr: replaceAttrWith(slog.SourceKey, awesomeVal),
+			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any(slog.SourceKey, awesomeValuer)),
 			want:        "2010-05-06 07:08:09 INF awesome > foobar size=12 color=red\n",
 		},
 		{
 			name: "replace source with source valuer",
-			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any("valuer", valuer{slog.AnyValue(&slog.Source{
+			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any(slog.SourceKey, valuer{slog.AnyValue(&slog.Source{
 				File: filepath.Join(cwd, "path", "to", "file.go"),
 				Line: 33,
 			})})),
@@ -607,6 +648,155 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 
 }
 
+func TestHandler_HeaderFormat(t *testing.T) {
+	pc, file, line, _ := runtime.Caller(0)
+	cwd, _ := os.Getwd()
+	file, _ = filepath.Rel(cwd, file)
+	sourceField := fmt.Sprintf("%s:%d", file, line)
+
+	testTime := time.Date(2024, 01, 02, 15, 04, 05, 123456789, time.UTC)
+
+	tests := []struct {
+		name       string
+		opts       HandlerOptions
+		attrs      []slog.Attr
+		withAttrs  []slog.Attr
+		withGroups []string
+		want       string
+	}{
+		{
+			name:  "default",
+			opts:  HandlerOptions{AddSource: true, NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "2024-01-02 15:04:05 INF " + sourceField + " > with headers foo=bar\n",
+		},
+		{
+			name: "one header",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true},
+			attrs: []slog.Attr{
+				slog.String("foo", "bar"),
+				slog.String("bar", "baz"),
+			},
+			want: "INF bar > with headers bar=baz\n",
+		},
+		{
+			name: "two headers",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			attrs: []slog.Attr{
+				slog.String("foo", "bar"),
+				slog.String("bar", "baz"),
+			},
+			want: "INF bar baz > with headers\n",
+		},
+		{
+			name: "two headers alt order",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			attrs: []slog.Attr{
+				slog.String("bar", "baz"),
+				slog.String("foo", "bar"),
+			},
+			want: "INF bar baz > with headers\n",
+		},
+		{
+			name:  "missing headers",
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF bar > with headers\n", // missing headers are omitted
+		},
+		{
+			name:  "missing headers, no space",
+			opts:  HandlerOptions{HeaderFormat: "%l%[foo]h%[bar]h>%m", NoColor: true}, // no spaces between headers or level/message
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INFbar>with headers\n",
+		},
+		{
+			name:       "header without group prefix does not match attr in group",
+			opts:       HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			attrs:      []slog.Attr{slog.String("foo", "bar")},
+			withGroups: []string{"group1"},
+			want:       "INF > with headers group1.foo=bar\n", // header is foo, not group1.foo
+		},
+		{
+			name:       "header with group prefix",
+			opts:       HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			attrs:      []slog.Attr{slog.String("foo", "bar")},
+			withGroups: []string{"group1"},
+			want:       "INF bar > with headers\n",
+		},
+		{
+			name:       "header in nested groups",
+			opts:       HandlerOptions{HeaderFormat: "%l %[group1.group2.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			attrs:      []slog.Attr{slog.String("foo", "bar")},
+			withGroups: []string{"group1", "group2"},
+			want:       "INF bar > with headers\n",
+		},
+		{
+			name:  "header in group attr, no match",
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			attrs: []slog.Attr{slog.Group("group1", slog.String("foo", "bar"))},
+			want:  "INF > with headers group1.foo=bar\n",
+		},
+		{
+			name:  "header in group attr, match",
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			attrs: []slog.Attr{slog.Group("group1", slog.String("foo", "bar"))},
+			want:  "INF bar > with headers\n",
+		},
+		{
+			name:       "header and withGroup and nested group",
+			opts:       HandlerOptions{HeaderFormat: "%l %[group1.foo]h %[group1.group2.bar]h > %m", NoColor: true}, // header is group2.attr0, attr0 is in root
+			attrs:      []slog.Attr{slog.String("foo", "bar"), slog.Group("group2", slog.String("bar", "baz"))},
+			withGroups: []string{"group1"},
+			want:       "INF bar baz > with headers\n",
+		},
+		{
+			name:  "no header",
+			opts:  HandlerOptions{HeaderFormat: "%l > %m", NoColor: true}, // no header
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF > with headers foo=bar\n",
+		},
+		{
+			name: "just level",
+			opts: HandlerOptions{HeaderFormat: "%l", NoColor: true}, // no header, no message
+			want: "INF\n",
+		},
+		{
+			name: "just message",
+			opts: HandlerOptions{HeaderFormat: "%m", NoColor: true}, // just message
+			want: "with headers\n",
+		},
+		// todo: test when the header matches a group attr
+		// todo: test non-capturing headers
+		// todo: test an attr matching a header multiple times (non-capturing)
+		// todo: test repeated fields
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := bytes.Buffer{}
+			var h slog.Handler = NewHandler(&buf, &tt.opts)
+
+			attrs := tt.attrs
+
+			withAttrs := tt.withAttrs
+
+			rec := slog.NewRecord(testTime, slog.LevelInfo, "with headers", pc)
+			rec.AddAttrs(attrs...)
+
+			if len(withAttrs) > 0 {
+				h = h.WithAttrs(withAttrs)
+			}
+
+			for _, group := range tt.withGroups {
+				h = h.WithGroup(group)
+			}
+
+			AssertNoError(t, h.Handle(context.Background(), rec))
+			AssertEqual(t, tt.want, buf.String())
+		})
+	}
+}
+
 func TestHandler_Headers(t *testing.T) {
 	pc, file, line, _ := runtime.Caller(0)
 	cwd, _ := os.Getwd()
@@ -686,7 +876,7 @@ func TestHandler_Headers(t *testing.T) {
 		},
 		{
 			name: "withgroup",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[group.bar]h > %m"},
 			attrs: []slog.Attr{
 				slog.String("bar", "baz"),
 				slog.String("baz", "foo"),
@@ -1169,6 +1359,18 @@ func TestParseFormat(t *testing.T) {
 			},
 			wantHeaders: []headerField{
 				{key: "logger", capture: true},
+			},
+		},
+		{
+			name:   "header with group prefix",
+			format: "%t %[group.logger]h",
+			wantFields: []any{
+				timestampField{},
+				" ",
+				headerField{groupPrefix: "group", key: "logger", capture: true},
+			},
+			wantHeaders: []headerField{
+				{groupPrefix: "group", key: "logger", capture: true},
 			},
 		},
 	}

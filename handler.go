@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 )
@@ -106,12 +105,14 @@ type Handler struct {
 
 type timestampField struct{}
 type headerField struct {
-	key        string
-	width      int
-	rightAlign bool
-	capture    bool
-	memo       string
+	groupPrefix string
+	key         string
+	width       int
+	rightAlign  bool
+	capture     bool
+	memo        string
 }
+
 type levelField struct {
 	abbreviated bool
 	rightAlign  bool
@@ -166,25 +167,18 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		src.Function = frame.Function
 		src.File = frame.File
 		src.Line = frame.Line
-		rec.AddAttrs(slog.Any(slog.SourceKey, &src))
+		// the source attr should not be inside any open groups
+		groups := enc.groups
+		enc.groups = nil
+		enc.encodeAttr("", slog.Any(slog.SourceKey, &src))
+		enc.groups = groups
+		// rec.AddAttrs(slog.Any(slog.SourceKey, &src))
 	}
-
-	headerAttrs := slices.Grow(enc.headerAttrs, len(h.headerFields))[:len(h.headerFields)]
-	clear(headerAttrs)
 
 	enc.attrBuf.Append(h.context)
 	enc.multilineAttrBuf.Append(h.multilineContext)
 
 	rec.Attrs(func(a slog.Attr) bool {
-		for i, f := range h.headerFields {
-			if f.key == a.Key {
-				headerAttrs[i] = a
-				if f.capture {
-					return true
-				}
-			}
-		}
-
 		enc.encodeAttr(h.groupPrefix, a)
 		return true
 	})
@@ -195,10 +189,11 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	for _, f := range h.fields {
 		switch f := f.(type) {
 		case headerField:
-			if headerAttrs[headerIdx].Equal(slog.Attr{}) && f.memo != "" {
-				enc.buf.AppendString(f.memo)
+			hf := h.headerFields[headerIdx]
+			if enc.headerAttrs[headerIdx].Equal(slog.Attr{}) && hf.memo != "" {
+				enc.buf.AppendString(hf.memo)
 			} else {
-				enc.encodeHeader(headerAttrs[headerIdx], f.width, f.rightAlign)
+				enc.encodeHeader(enc.headerAttrs[headerIdx], hf.width, hf.rightAlign)
 			}
 			headerIdx++
 		case levelField:
@@ -241,11 +236,11 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	enc := newEncoder(h)
 
-	attrs, fields := h.memoizeHeaders(enc, attrs)
-
 	for _, a := range attrs {
 		enc.encodeAttr(h.groupPrefix, a)
 	}
+
+	headerFields := memoizeHeaders(enc, h.headerFields)
 
 	newCtx := h.context
 	newMultiCtx := h.multilineContext
@@ -267,8 +262,8 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		context:          newCtx,
 		multilineContext: newMultiCtx,
 		groups:           h.groups,
-		fields:           fields,
-		headerFields:     h.headerFields,
+		fields:           h.fields,
+		headerFields:     headerFields,
 	}
 }
 
@@ -290,32 +285,18 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func (h *Handler) memoizeHeaders(enc *encoder, attrs []slog.Attr) ([]slog.Attr, []any) {
-	newFields := make([]any, len(h.fields))
-	copy(newFields, h.fields)
-	remainingAttrs := make([]slog.Attr, 0, len(attrs))
+func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
+	newFields := make([]headerField, len(headerFields))
+	copy(newFields, headerFields)
 
-	for _, attr := range attrs {
-		capture := false
-		for i, field := range h.fields {
-			if headerField, ok := field.(headerField); ok {
-				if headerField.key == attr.Key {
-					enc.buf.Reset()
-					enc.encodeHeader(attr, headerField.width, headerField.rightAlign)
-					headerField.memo = enc.buf.String()
-					newFields[i] = headerField
-					if headerField.capture {
-						capture = true
-					}
-					// don't break, in case there are multiple headers with the same key
-				}
-			}
-		}
-		if !capture {
-			remainingAttrs = append(remainingAttrs, attr)
+	for i := range newFields {
+		if !enc.headerAttrs[i].Equal(slog.Attr{}) {
+			enc.buf.Reset()
+			enc.encodeHeader(enc.headerAttrs[i], newFields[i].width, newFields[i].rightAlign)
+			newFields[i].memo = enc.buf.String()
 		}
 	}
-	return remainingAttrs, newFields
+	return newFields
 }
 
 // ParseFormatResult contains the parsed fields and header count from a format string
@@ -467,6 +448,10 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 				width:      width,
 				rightAlign: rightAlign,
 				capture:    capture,
+			}
+			if idx := strings.LastIndexByte(key, '.'); idx > -1 {
+				hf.groupPrefix = key[:idx]
+				hf.key = key[idx+1:]
 			}
 			field = hf
 			headerFields = append(headerFields, hf)

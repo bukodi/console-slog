@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,8 @@ func newEncoder(h *Handler) *encoder {
 	if h.opts.ReplaceAttr != nil {
 		e.groups = append(e.groups, h.groups...)
 	}
+	e.headerAttrs = slices.Grow(e.headerAttrs, len(h.headerFields))[:len(h.headerFields)]
+	clear(e.headerAttrs)
 	return e
 }
 
@@ -108,10 +111,6 @@ func (e *encoder) encodeMessage(level slog.Level, msg string) {
 }
 
 func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {
-	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
-		a = e.h.opts.ReplaceAttr(nil, a)
-		a.Value = a.Value.Resolve()
-	}
 	if a.Value.Equal(slog.Value{}) {
 		// just pad as needed
 		if width > 0 {
@@ -231,6 +230,45 @@ func (e *encoder) encodeLevel(l slog.Level, abbreviated bool) {
 }
 
 func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
+
+	a.Value = a.Value.Resolve()
+	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
+		a = e.h.opts.ReplaceAttr(e.groups, a)
+		a.Value = a.Value.Resolve()
+	}
+	// Elide empty Attrs.
+	if a.Equal(slog.Attr{}) {
+		return
+	}
+
+	value := a.Value
+
+	if value.Kind() == slog.KindGroup {
+		subgroup := a.Key
+		if groupPrefix != "" {
+			subgroup = groupPrefix + "." + a.Key
+		}
+		if e.h.opts.ReplaceAttr != nil {
+			e.groups = append(e.groups, a.Key)
+		}
+		for _, attr := range value.Group() {
+			e.encodeAttr(subgroup, attr)
+		}
+		if e.h.opts.ReplaceAttr != nil {
+			e.groups = e.groups[:len(e.groups)-1]
+		}
+		return
+	}
+
+	for i, f := range e.h.headerFields {
+		if f.key == a.Key && f.groupPrefix == groupPrefix {
+			e.headerAttrs[i] = a
+			if f.capture {
+				return
+			}
+		}
+	}
+
 	offset := e.attrBuf.Len()
 	e.writeAttr(&e.attrBuf, a, groupPrefix)
 
@@ -305,34 +343,7 @@ func (e *encoder) writeColoredString(w *buffer, s string, c ANSIMod) {
 }
 
 func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
-	a.Value = a.Value.Resolve()
-	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
-		a = e.h.opts.ReplaceAttr(e.groups, a)
-		a.Value = a.Value.Resolve()
-	}
-	// Elide empty Attrs.
-	if a.Equal(slog.Attr{}) {
-		return
-	}
-
 	value := a.Value
-
-	if value.Kind() == slog.KindGroup {
-		subgroup := a.Key
-		if group != "" {
-			subgroup = group + "." + a.Key
-		}
-		if e.h.opts.ReplaceAttr != nil {
-			e.groups = append(e.groups, a.Key)
-		}
-		for _, attr := range value.Group() {
-			e.writeAttr(buf, attr, subgroup)
-		}
-		if e.h.opts.ReplaceAttr != nil {
-			e.groups = e.groups[:len(e.groups)-1]
-		}
-		return
-	}
 
 	buf.AppendByte(' ')
 	e.withColor(buf, e.h.opts.Theme.AttrKey(), func() {
