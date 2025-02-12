@@ -16,6 +16,7 @@ var encoderPool = &sync.Pool{
 		e.buf = make(buffer, 0, 1024)
 		e.attrBuf = make(buffer, 0, 1024)
 		e.multilineAttrBuf = make(buffer, 0, 1024)
+		e.headerAttrs = make([]slog.Attr, 0, 5)
 		return e
 	},
 }
@@ -24,6 +25,7 @@ type encoder struct {
 	h                              *Handler
 	buf, attrBuf, multilineAttrBuf buffer
 	groups                         []string
+	headerAttrs                    []slog.Attr
 }
 
 func newEncoder(h *Handler) *encoder {
@@ -44,6 +46,7 @@ func (e *encoder) free() {
 	e.attrBuf.Reset()
 	e.multilineAttrBuf.Reset()
 	e.groups = e.groups[:0]
+	e.headerAttrs = e.headerAttrs[:0]
 	encoderPool.Put(e)
 }
 
@@ -70,36 +73,6 @@ func (e *encoder) writeColoredTime(w *buffer, t time.Time, format string, c ANSI
 func (e *encoder) writeColoredString(w *buffer, s string, c ANSIMod) {
 	e.withColor(w, c, func() {
 		w.AppendString(s)
-	})
-}
-
-func (e *encoder) writeColoredInt(w *buffer, i int64, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendInt(i)
-	})
-}
-
-func (e *encoder) writeColoredUint(w *buffer, i uint64, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendUint(i)
-	})
-}
-
-func (e *encoder) writeColoredFloat(w *buffer, i float64, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendFloat(i)
-	})
-}
-
-func (e *encoder) writeColoredBool(w *buffer, b bool, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendBool(b)
-	})
-}
-
-func (e *encoder) writeColoredDuration(w *buffer, d time.Duration, c ANSIMod) {
-	e.withColor(w, c, func() {
-		w.AppendDuration(d)
 	})
 }
 
@@ -157,20 +130,6 @@ func (e *encoder) writeMessage(buf *buffer, level slog.Level, msg string) {
 	e.writeColoredString(buf, msg, style)
 }
 
-// func (e encoder) writeHeaders(buf *buffer, headers []slog.Attr) {
-// 	for _, a := range headers {
-// 		if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
-// 			a = e.h.opts.ReplaceAttr(nil, a)
-// 			a.Value = a.Value.Resolve()
-// 		}
-// 		if a.Value.Equal(slog.Value{}) {
-// 			continue
-// 		}
-// 		e.writeColoredValue(buf, a.Value, e.h.opts.Theme.Source())
-// 		buf.AppendByte(' ')
-// 	}
-// }
-
 func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int, rightAlign bool) {
 	if a.Value.Kind() != slog.KindGroup && e.h.opts.ReplaceAttr != nil {
 		a = e.h.opts.ReplaceAttr(nil, a)
@@ -216,10 +175,6 @@ func (e encoder) writeHeader(buf *buffer, a slog.Attr, width int, rightAlign boo
 			}
 		}
 	})
-}
-
-func (e encoder) writeHeaderSeparator(buf *buffer) {
-	e.writeColoredString(buf, "> ", e.h.opts.Theme.AttrKey())
 }
 
 func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {

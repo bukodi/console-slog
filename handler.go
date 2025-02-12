@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -227,8 +228,8 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		rec.AddAttrs(slog.Any(slog.SourceKey, &src))
 	}
 
-	// todo: make this part of the encoder struct
-	headers := make([]slog.Attr, len(h.headerFields))
+	headerAttrs := slices.Grow(enc.headerAttrs, len(h.headerFields))[:len(h.headerFields)]
+	clear(headerAttrs)
 
 	enc.attrBuf.Append(h.context)
 	enc.multilineAttrBuf.Append(h.multilineContext)
@@ -236,7 +237,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	rec.Attrs(func(a slog.Attr) bool {
 		for i, f := range h.headerFields {
 			if f.key == a.Key {
-				headers[i] = a
+				headerAttrs[i] = a
 				if f.capture {
 					return true
 				}
@@ -253,10 +254,10 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	for _, f := range h.fields {
 		switch f := f.(type) {
 		case headerField:
-			if headers[headerIdx].Equal(slog.Attr{}) && f.memo != "" {
+			if headerAttrs[headerIdx].Equal(slog.Attr{}) && f.memo != "" {
 				enc.buf.AppendString(f.memo)
 			} else {
-				enc.writeHeader(&enc.buf, headers[headerIdx], f.width, f.rightAlign)
+				enc.writeHeader(&enc.buf, headerAttrs[headerIdx], f.width, f.rightAlign)
 			}
 			headerIdx++
 		case levelField:
@@ -266,8 +267,12 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		case timestampField:
 			enc.writeTimestamp(&enc.buf, rec.Time)
 		case string:
+			// todo: need to color these strings
+			// todo: can we generalize this to some form of grouping?
 			if swallow {
-				f = strings.TrimPrefix(f, " ")
+				if len(f) > 0 && f[0] == ' ' {
+					f = f[1:]
+				}
 			}
 			enc.buf.AppendString(f)
 			l = 0 // ensure the next field is not swallowed
