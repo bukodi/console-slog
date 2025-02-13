@@ -115,7 +115,6 @@ type headerField struct {
 
 type levelField struct {
 	abbreviated bool
-	rightAlign  bool
 }
 type messageField struct{}
 
@@ -327,7 +326,7 @@ func (p ParseFormatResult) Equal(other ParseFormatResult) bool {
 // %h - headerField, requires [name] modifier, supports width, - and + modifiers
 // %m - messageField
 // %l - abbreviated levelField
-// %L - non-abbreviated levelField, supports - modifier
+// %L - non-abbreviated levelField
 //
 // Modifiers:
 // [name]: the key of the attribute to capture as a header, required
@@ -412,7 +411,7 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 
 		// Look for modifiers
 		for i < len(format) {
-			if format[i] == '-' {
+			if format[i] == '-' && key != "" { // '-' only valid for headers
 				rightAlign = true
 				i++
 			} else if format[i] == '+' && key != "" { // '+' only valid for headers
@@ -462,7 +461,6 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 		case 'L':
 			field = levelField{
 				abbreviated: false,
-				rightAlign:  rightAlign,
 			}
 		default:
 			fields = append(fields, fmt.Sprintf("%%!%c(INVALID_VERB)", format[i]))
