@@ -193,10 +193,13 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 		},
 		{
 			name: "multiline attr using WithAttrs",
-			attrs: []slog.Attr{
-				slog.String("foo", "line one\nline two"),
+			handlerFunc: func(h slog.Handler) slog.Handler {
+				return h.WithAttrs([]slog.Attr{
+					slog.String("foo", "line one\nline two"),
+				})
 			},
-			want: "INF > multiline attrs foo=line one\nline two\n",
+			attrs: []slog.Attr{slog.String("bar", "baz")},
+			want:  "INF > multiline attrs bar=baz foo=line one\nline two\n",
 		},
 		{
 			name: "multiline header value",
@@ -712,6 +715,135 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 
 }
 
+func TestHandler_CollapseSpaces(t *testing.T) {
+	tests := []handlerTest{
+		{
+			name: "simple",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "two fields",
+			opts: HandlerOptions{HeaderFormat: "%l %t"},
+			want: "INF\n",
+		},
+		{
+			name: "two missing fields",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "adjacent missing fields",
+			opts: HandlerOptions{HeaderFormat: "%l %t%t > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "fields in a group",
+			opts: HandlerOptions{HeaderFormat: "%l %{%t%t%} > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "groups and spaces",
+			opts: HandlerOptions{HeaderFormat: "%l %{ %t %t > %} %m"},
+			want: "INF collapse spaces\n",
+		},
+		{
+			name: "leading space is preserved",
+			opts: HandlerOptions{HeaderFormat: " %t %t %l > %t > %m"},
+			want: " INF > > collapse spaces\n",
+		},
+		{
+			name: "first field is elided",
+			opts: HandlerOptions{HeaderFormat: "%t %l > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "extra space is preserved",
+			opts: HandlerOptions{HeaderFormat: "%t  %t   %l >  %t > %m"},
+			want: "     INF >  > collapse spaces\n",
+		},
+		{
+			name: "groups",
+			opts: HandlerOptions{HeaderFormat: "%l %{[%t][%l][%t]%} > %m"},
+			want: "INF [][INF][] > collapse spaces\n",
+		},
+		{
+			name: "more groups",
+			opts: HandlerOptions{HeaderFormat: "%l %{[%t]%}%{[%l]%}%{[%t]%} > %m"},
+			want: "INF [INF] > collapse spaces\n",
+		},
+		{
+			name: "elided group starts after a non-space, and ends with a space",
+			opts: HandlerOptions{HeaderFormat: "%l%{%t %} > %m"},
+			want: "INF > collapse spaces\n",
+		},
+		{
+			name: "empty padded header should not elide surrounding spaces",
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]5h > %m"},
+			want: "INF       > collapse spaces\n",
+		},
+		{
+			name: "space between fields",
+			opts: HandlerOptions{HeaderFormat: "%l [%[foo]h %[bar]h] > %m"},
+			want: "INF [] > collapse spaces\n",
+		},
+		{
+			name: "space between and around fields",
+			opts: HandlerOptions{HeaderFormat: "%l [ %[foo]h %[bar]h ] > %m"},
+			want: "INF [ ] > collapse spaces\n",
+		},
+	}
+
+	for _, tt := range tests {
+		tt.msg = "collapse spaces"
+		tt.opts.NoColor = true
+		tt.runSubtest(t)
+	}
+}
+
+func TestHandler_HeaderFormat_Groups(t *testing.T) {
+	tests := []handlerTest{
+		{
+			name:  "group not elided",
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m"},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF [bar] > groups\n",
+		},
+		{
+			name: "group elided",
+			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m"},
+			want: "INF > groups\n",
+		},
+		{
+			name: "two headers in group, both elided",
+			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			want: "INF > groups\n",
+		},
+		{
+			name:  "two headers in group, one elided",
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF [bar] > groups\n",
+		},
+		{
+			name:  "two headers in group, neither elided",
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			attrs: []slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")},
+			want:  "INF [bar baz] > groups\n",
+		},
+	}
+
+	for _, tt := range tests {
+		tt.msg = "groups"
+		tt.opts.NoColor = true
+		tt.runSubtest(t)
+	}
+}
+
+// Add a test for header formats with groups
+// nested
+// extra open/close groups
+
 func TestHandler_HeaderFormat(t *testing.T) {
 	pc, file, line, _ := runtime.Caller(0)
 	cwd, _ := os.Getwd()
@@ -878,7 +1010,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			name:  "missing header and multiple spaces",
 			opts:  HandlerOptions{HeaderFormat: "%l   %[missing]h  %[foo]h  >  %m", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "INF    bar  >  with headers\n",
+			want:  "INF     bar  >  with headers\n",
 		},
 		{
 			name:  "fixed width header left aligned",

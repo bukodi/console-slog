@@ -68,16 +68,18 @@ type HandlerOptions struct {
 	//
 	// The format is a string containing verbs, which are expanded as follows:
 	//
-	//	%t	timestamp
-	//	%l	abbreviated level (e.g. "INF")
-	//	%L	level (e.g. "INFO")
-	//	%m	message
-	//	%[key]h	header with the given key.
+	//	%t	     timestamp
+	//	%l	     abbreviated level (e.g. "INF")
+	//	%L	     level (e.g. "INFO")
+	//	%m	     message
+	//	%[key]h	 header with the given key.
+	//  %{       group open
+	//  %}       group close
 	//
 	// Headers print the value of the attribute with the given key, and remove that
 	// attribute from the end of the log line.
 	//
-	// Headers can be customized with width, alignment, and non-capturing,
+	// Headers can be customized with width, alignment, and non-capturing modifiers,
 	// similar to fmt.Printf verbs. For example:
 	//
 	//	%[key]10h		// left-aligned, width 10
@@ -85,9 +87,46 @@ type HandlerOptions struct {
 	//	%[key]+h		// non-capturing
 	//	%[key]-10+h		// right-aligned, width 10, non-capturing
 	//
-	// If the header is non-capturing, the header field will be printed, but
-	// the attribute will still be available for matching subsequent header fields,
-	// and/or printing in the attributes section of the log line.
+	// Note that headers will "capture" their matching attribute by default, which means that attribute will not
+	// be included in the attributes section of the log line, and will not be matched by subsequent header fields.
+	// Use the non-capturing header modifier '+' to disable capturing.  If a header is non-capturing, the attribute
+	// will still be available for matching subsequent header fields, and will be included in the attributes section
+	// of the log line.
+	//
+	// Groups will omit their contents if all the fields in that group are omitted.  For example:
+	//
+	//	"%l %{%[logger]h %[source]h > %} %m"
+	//
+	// will print "INF main main.go:123 > msg" if the either the logger or source attribute is present.  But if the
+	// both attributes are not present, or were elided by ReplaceAttr, then this will print "INF msg".  Groups can
+	// be nested.
+	//
+	// If a field is followed by a space, and the field is omitted, the following space is also omitted, as if
+	// the field and space are in a group.  This ensures that spaces between fields collapse as expected.
+	// For example:
+	//
+	//	"%l %[logger]h %[source]h %t > %m"
+	//
+	// If logger and timestamp are omitted, this will print "INF main.go:123 > msg".  The spaces after logger and timestamp
+	// are omitted.
+	//
+	// Examples:
+	//
+	//	"%t %l %m"                         // timestamp, level, message
+	//	"%t [%l] %m"                       // timestamp, level in brackets, message
+	//	"%t %l:%m"                         // timestamp, level:message
+	//	"%t %l %[key]h %m"                 // timestamp, level, header with key "key", message
+	//	"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
+	//	"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
+	//	"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
+	//	"%t %l %[key]10+h %m"              // timestamp, level, captured header with key "key" and width 10, message
+	//	"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned captured header with key "key" and width 10, message
+	//	"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
+	//	"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
+	//	"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
+	//	"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
+	//	"%% %t %l %m"                      // literal "%", timestamp, level, message
+	//  "%{[%t]%} %{[%l]%} %m"             // timestamp and level in brackets, message, brackets will be omitted if empty
 	HeaderFormat string
 }
 
@@ -117,6 +156,9 @@ type levelField struct {
 	abbreviated bool
 }
 type messageField struct{}
+
+type groupOpen struct{}
+type groupClose struct{}
 
 var _ slog.Handler = (*Handler)(nil)
 
@@ -182,12 +224,36 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		return true
 	})
 
-	var swallow bool
 	headerIdx := 0
-	var l int
-	for _, f := range h.fields {
+	var state encodeState
+
+	// use a fixed size stack to avoid allocations, 3 deep nested groups should be enough for most cases
+	stackArr := [3]encodeState{}
+	stack := stackArr[:0]
+	for i, f := range h.fields {
 		switch f := f.(type) {
+		case groupOpen:
+			stack = append(stack, state)
+			state.groupStart = enc.buf.Len()
+			state.printedField = false
+		case groupClose:
+			if len(stack) == 0 {
+				// missing group open
+				// no-op
+				continue
+			}
+
+			printedField := state.printedField
+			if !printedField {
+				enc.buf.Truncate(state.groupStart)
+			}
+			state = stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			// if a field was printed in the inner group,
+			// then it was also printed in the outer group
+			state.printedField = printedField || state.printedField
 		case headerField:
+			l := enc.buf.Len()
 			hf := h.headerFields[headerIdx]
 			if enc.headerAttrs[headerIdx].Equal(slog.Attr{}) && hf.memo != "" {
 				enc.buf.AppendString(hf.memo)
@@ -195,26 +261,36 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				enc.encodeHeader(enc.headerAttrs[headerIdx], hf.width, hf.rightAlign)
 			}
 			headerIdx++
+			state.printedField = state.printedField || enc.buf.Len() > l
 		case levelField:
+			l := enc.buf.Len()
 			enc.encodeLevel(rec.Level, f.abbreviated)
+			state.printedField = state.printedField || enc.buf.Len() > l
 		case messageField:
+			l := enc.buf.Len()
 			enc.encodeMessage(rec.Level, rec.Message)
+			state.printedField = state.printedField || enc.buf.Len() > l
 		case timestampField:
+			l := enc.buf.Len()
 			enc.encodeTimestamp(rec.Time)
+			state.printedField = state.printedField || enc.buf.Len() > l
 		case string:
-			// todo: need to color these strings
-			// todo: can we generalize this to some form of grouping?
-			if swallow {
-				if len(f) > 0 && f[0] == ' ' {
+			// elide the next space if the buf ends in a trailing space
+			if enc.buf.Len() == state.trailingSpace && startsWithSingleSpace(f) {
+				if i > 0 {
+					// special case: if the first field is a string
+					// never elide it
 					f = f[1:]
 				}
 			}
+
+			// todo: need to color these strings
 			enc.buf.AppendString(f)
-			l = 0 // ensure the next field is not swallowed
+
+			if len(f) > 0 && endsWithSpace(f) {
+				state.trailingSpace = enc.buf.Len()
+			}
 		}
-		l2 := enc.buf.Len()
-		swallow = l2 == l
-		l = l2
 	}
 
 	// concatenate the buffers together before writing to out, so the entire
@@ -229,6 +305,28 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 
 	enc.free()
 	return nil
+}
+
+type encodeState struct {
+	groupStart int
+	// l              int
+	printedField  bool
+	trailingSpace int
+}
+
+func endsWithSpace(s string) bool {
+	return len(s) > 0 && s[len(s)-1] == ' '
+}
+
+func startsWithSingleSpace(s string) bool {
+	lf := len(s)
+	if lf == 1 && s[0] == ' ' {
+		return true
+	}
+	if lf > 1 && s[0] == ' ' && s[1] != ' ' {
+		return true
+	}
+	return false
 }
 
 // WithAttrs implements slog.Handler.
@@ -462,6 +560,10 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 			field = levelField{
 				abbreviated: false,
 			}
+		case '{':
+			field = groupOpen{}
+		case '}':
+			field = groupClose{}
 		default:
 			fields = append(fields, fmt.Sprintf("%%!%c(INVALID_VERB)", format[i]))
 			continue
