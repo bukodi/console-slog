@@ -160,6 +160,8 @@ type messageField struct{}
 type groupOpen struct{}
 type groupClose struct{}
 
+type spacerField struct{}
+
 var _ slog.Handler = (*Handler)(nil)
 
 // NewHandler creates a Handler that writes to w,
@@ -230,12 +232,13 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	// use a fixed size stack to avoid allocations, 3 deep nested groups should be enough for most cases
 	stackArr := [3]encodeState{}
 	stack := stackArr[:0]
-	for i, f := range h.fields {
-		switch f := f.(type) {
+	for _, f := range h.fields {
+		switch f.(type) {
 		case groupOpen:
 			stack = append(stack, state)
 			state.groupStart = enc.buf.Len()
 			state.printedField = false
+			continue
 		case groupClose:
 			if len(stack) == 0 {
 				// missing group open
@@ -243,17 +246,33 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				continue
 			}
 
-			printedField := state.printedField
-			if !printedField {
-				enc.buf.Truncate(state.groupStart)
-			}
+			poppedState := state
 			state = stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			// if a field was printed in the inner group,
-			// then it was also printed in the outer group
-			state.printedField = printedField || state.printedField
+
+			if !poppedState.printedField {
+				enc.buf.Truncate(poppedState.groupStart)
+			} else {
+				// the group was not elide, so push
+				// back some of the inner state to the
+				// outer state
+				state.printedField = true
+				state.anchored = state.anchored || poppedState.anchored
+				state.spacePending = state.spacePending || poppedState.spacePending
+			}
+			continue
+		case spacerField:
+			state.spacePending = true
+			continue
+		}
+		if state.anchored && state.spacePending {
+			enc.buf.AppendByte(' ')
+		}
+		state.spacePending = false
+		l := enc.buf.Len()
+		var wasString bool
+		switch f := f.(type) {
 		case headerField:
-			l := enc.buf.Len()
 			hf := h.headerFields[headerIdx]
 			if enc.headerAttrs[headerIdx].Equal(slog.Attr{}) && hf.memo != "" {
 				enc.buf.AppendString(hf.memo)
@@ -261,36 +280,24 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				enc.encodeHeader(enc.headerAttrs[headerIdx], hf.width, hf.rightAlign)
 			}
 			headerIdx++
-			state.printedField = state.printedField || enc.buf.Len() > l
+
 		case levelField:
-			l := enc.buf.Len()
 			enc.encodeLevel(rec.Level, f.abbreviated)
-			state.printedField = state.printedField || enc.buf.Len() > l
 		case messageField:
-			l := enc.buf.Len()
 			enc.encodeMessage(rec.Level, rec.Message)
-			state.printedField = state.printedField || enc.buf.Len() > l
 		case timestampField:
-			l := enc.buf.Len()
 			enc.encodeTimestamp(rec.Time)
-			state.printedField = state.printedField || enc.buf.Len() > l
 		case string:
-			// elide the next space if the buf ends in a trailing space
-			if enc.buf.Len() == state.trailingSpace && startsWithSingleSpace(f) {
-				if i > 0 {
-					// special case: if the first field is a string
-					// never elide it
-					f = f[1:]
-				}
-			}
-
-			// todo: need to color these strings
 			enc.buf.AppendString(f)
-
-			if len(f) > 0 && endsWithSpace(f) {
-				state.trailingSpace = enc.buf.Len()
-			}
+			wasString = true
 		}
+		state.anchored = enc.buf.Len() > l
+		state.printedField = state.printedField || (state.anchored && !wasString)
+	}
+
+	// trim trailing space
+	if len(enc.buf) > 0 && enc.buf[enc.buf.Len()-1] == ' ' {
+		enc.buf.Truncate(enc.buf.Len() - 1)
 	}
 
 	// concatenate the buffers together before writing to out, so the entire
@@ -308,10 +315,13 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 }
 
 type encodeState struct {
-	groupStart int
-	// l              int
-	printedField  bool
-	trailingSpace int
+	groupStart   int
+	printedField bool
+	// True if the last field was not elided.  When anchored is true, the
+	// next pending space will not be elided
+	anchored bool
+	// Track if we need to print a space from a previous spacerField
+	spacePending bool
 }
 
 func endsWithSpace(s string) bool {
@@ -458,11 +468,23 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 	fields = make([]any, 0)
 	headerFields = make([]headerField, 0)
 
+	format = strings.TrimSpace(format)
+	lastWasSpace := false
+
 	for i := 0; i < len(format); i++ {
+		if format[i] == ' ' {
+			if !lastWasSpace {
+				fields = append(fields, spacerField{})
+				lastWasSpace = true
+			}
+			continue
+		}
+		lastWasSpace = false
+
 		if format[i] != '%' {
-			// Find the next % or end of string
+			// Find the next % or space or end of string
 			start := i
-			for i < len(format) && format[i] != '%' {
+			for i < len(format) && format[i] != '%' && format[i] != ' ' {
 				i++
 			}
 			fields = append(fields, format[start:i])

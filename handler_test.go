@@ -645,7 +645,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 		{
 			name:        "clear message",
 			replaceAttr: replaceAttrWith(slog.MessageKey, slog.Any(slog.MessageKey, nil)),
-			want:        "2010-05-06 07:08:09 INF " + sourceField + " >  size=12 color=red\n",
+			want:        "2010-05-06 07:08:09 INF " + sourceField + " > size=12 color=red\n",
 		},
 		{
 			name:        "replace message",
@@ -748,19 +748,19 @@ func TestHandler_CollapseSpaces(t *testing.T) {
 			want: "INF collapse spaces\n",
 		},
 		{
-			name: "leading space is preserved",
+			name: "leading space is trimmed",
 			opts: HandlerOptions{HeaderFormat: " %t %t %l > %t > %m"},
-			want: " INF > > collapse spaces\n",
+			want: "INF > > collapse spaces\n",
 		},
 		{
 			name: "first field is elided",
-			opts: HandlerOptions{HeaderFormat: "%t %l > %m"},
+			opts: HandlerOptions{HeaderFormat: " %t %l > %m"},
 			want: "INF > collapse spaces\n",
 		},
 		{
-			name: "extra space is preserved",
+			name: "extra space is elided",
 			opts: HandlerOptions{HeaderFormat: "%t  %t   %l >  %t > %m"},
-			want: "     INF >  > collapse spaces\n",
+			want: "INF > > collapse spaces\n",
 		},
 		{
 			name: "groups",
@@ -1010,7 +1010,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			name:  "missing header and multiple spaces",
 			opts:  HandlerOptions{HeaderFormat: "%l   %[missing]h  %[foo]h  >  %m", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "INF     bar  >  with headers\n",
+			want:  "INF bar > with headers\n",
 		},
 		{
 			name:  "fixed width header left aligned",
@@ -1058,7 +1058,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			name:  "alternate text",
 			opts:  HandlerOptions{HeaderFormat: "prefix [%l] [%[foo]h] %m suffix > ", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "prefix [INF] [bar] with headers suffix > \n",
+			want:  "prefix [INF] [bar] with headers suffix >\n",
 		},
 		{
 			name:  "escaped percent",
