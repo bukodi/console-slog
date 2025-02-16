@@ -283,27 +283,31 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			stack = stack[:len(stack)-1]
 			continue
 		case spacerField:
-			if state.trailingSpace {
-				// coalesce spaces
+			if len(enc.buf) == 0 {
+				// special case, always skip leading space
 				continue
 			}
+
 			if f.hard {
-				enc.buf.AppendByte(' ')
-				state.trailingSpace = true
-				state.pendingSpace = false
-				state.anchored = false
+				state.pendingHardSpace = true
+			} else {
+				// only queue a soft space if the last
+				// thing printed was not a string field.
+				state.pendingSpace = state.anchored
 			}
 
-			state.pendingSpace = state.anchored
 			continue
 		case string:
+			if state.pendingHardSpace {
+				enc.buf.AppendByte(' ')
+			}
+			state.pendingHardSpace = false
 			state.pendingSpace = false
-			state.trailingSpace = false
 			state.anchored = false
 			enc.buf.AppendString(f)
 			continue
 		}
-		if state.pendingSpace {
+		if state.pendingSpace || state.pendingHardSpace {
 			enc.buf.AppendByte(' ')
 		}
 		l := enc.buf.Len()
@@ -328,18 +332,15 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		state.printedField = state.printedField || printed
 		if printed {
 			state.pendingSpace = false
-			state.trailingSpace = false
+			state.pendingHardSpace = false
 			state.anchored = true
-		} else if state.pendingSpace {
+		} else if state.pendingSpace || state.pendingHardSpace {
 			// chop the last space
 			enc.buf = bytes.TrimSpace(enc.buf)
 			// leave state.spacePending as is for next
 			// field to handle
 		}
 	}
-
-	// trim space
-	enc.buf = bytes.TrimSpace(enc.buf)
 
 	// concatenate the buffers together before writing to out, so the entire
 	// log line is written in a single Write call
@@ -364,7 +365,7 @@ type encodeState struct {
 	// closes, if this is false, the entire group will be elided
 	printedField bool
 
-	anchored, trailingSpace, pendingSpace bool
+	anchored, pendingSpace, pendingHardSpace bool
 }
 
 // WithAttrs implements slog.Handler.
