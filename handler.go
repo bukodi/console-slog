@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -101,14 +102,7 @@ type HandlerOptions struct {
 	// both attributes are not present, or were elided by ReplaceAttr, then this will print "INF msg".  Groups can
 	// be nested.
 	//
-	// If a field is followed by a space, and the field is omitted, the following space is also omitted, as if
-	// the field and space are in a group.  This ensures that spaces between fields collapse as expected.
-	// For example:
-	//
-	//	"%l %[logger]h %[source]h %t > %m"
-	//
-	// If logger and timestamp are omitted, this will print "INF main.go:123 > msg".  The spaces after logger and timestamp
-	// are omitted.
+	// Whitespace is generally merged to leave a single space between fields.  Leading and trailing whitespace is trimmed.
 	//
 	// Examples:
 	//
@@ -160,7 +154,9 @@ type messageField struct{}
 type groupOpen struct{}
 type groupClose struct{}
 
-type spacerField struct{}
+type spacerField struct {
+	hard bool
+}
 
 var _ slog.Handler = (*Handler)(nil)
 
@@ -226,14 +222,40 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		return true
 	})
 
+	// todo: if we keep this, it needs to move into parseFormat or something
+	var wasString bool
+	lastSpace := -1
+	for i, f := range h.fields {
+		switch f.(type) {
+		case headerField, levelField, messageField, timestampField:
+			wasString = false
+			lastSpace = -1
+		case string:
+			if lastSpace != -1 {
+				// string immediately followed space, so the
+				// space is hard.
+				h.fields[lastSpace] = spacerField{hard: true}
+			}
+			wasString = true
+			lastSpace = -1
+		case spacerField:
+			if wasString {
+				// space immedately followed a string, so the space
+				// is hard
+				h.fields[i] = spacerField{hard: true}
+			}
+			lastSpace = i
+			wasString = false
+		}
+	}
+
 	headerIdx := 0
 	var state encodeState
-
 	// use a fixed size stack to avoid allocations, 3 deep nested groups should be enough for most cases
 	stackArr := [3]encodeState{}
 	stack := stackArr[:0]
 	for _, f := range h.fields {
-		switch f.(type) {
+		switch f := f.(type) {
 		case groupOpen:
 			stack = append(stack, state)
 			state.groupStart = enc.buf.Len()
@@ -246,31 +268,45 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				continue
 			}
 
-			poppedState := state
-			state = stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-
-			if !poppedState.printedField {
-				enc.buf.Truncate(poppedState.groupStart)
+			if state.printedField {
+				// keep the current state, and just roll back
+				// the group start index to the prior group
+				state.groupStart = stack[len(stack)-1].groupStart
 			} else {
-				// the group was not elide, so push
-				// back some of the inner state to the
-				// outer state
-				state.printedField = true
-				state.anchored = state.anchored || poppedState.anchored
-				state.spacePending = state.spacePending || poppedState.spacePending
+				// no fields were printed in this group, so
+				// rollback the entire group and pop back to
+				// the outer state
+				enc.buf.Truncate(state.groupStart)
+				state = stack[len(stack)-1]
 			}
+			// pop a state off the stack
+			stack = stack[:len(stack)-1]
 			continue
 		case spacerField:
-			state.spacePending = true
+			if state.trailingSpace {
+				// coalesce spaces
+				continue
+			}
+			if f.hard {
+				enc.buf.AppendByte(' ')
+				state.trailingSpace = true
+				state.pendingSpace = false
+				state.anchored = false
+			}
+
+			state.pendingSpace = state.anchored
+			continue
+		case string:
+			state.pendingSpace = false
+			state.trailingSpace = false
+			state.anchored = false
+			enc.buf.AppendString(f)
 			continue
 		}
-		if state.anchored && state.spacePending {
+		if state.pendingSpace {
 			enc.buf.AppendByte(' ')
 		}
-		state.spacePending = false
 		l := enc.buf.Len()
-		var wasString bool
 		switch f := f.(type) {
 		case headerField:
 			hf := h.headerFields[headerIdx]
@@ -287,18 +323,23 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			enc.encodeMessage(rec.Level, rec.Message)
 		case timestampField:
 			enc.encodeTimestamp(rec.Time)
-		case string:
-			enc.buf.AppendString(f)
-			wasString = true
 		}
-		state.anchored = enc.buf.Len() > l
-		state.printedField = state.printedField || (state.anchored && !wasString)
+		printed := enc.buf.Len() > l
+		state.printedField = state.printedField || printed
+		if printed {
+			state.pendingSpace = false
+			state.trailingSpace = false
+			state.anchored = true
+		} else if state.pendingSpace {
+			// chop the last space
+			enc.buf = bytes.TrimSpace(enc.buf)
+			// leave state.spacePending as is for next
+			// field to handle
+		}
 	}
 
-	// trim trailing space
-	if len(enc.buf) > 0 && enc.buf[enc.buf.Len()-1] == ' ' {
-		enc.buf.Truncate(enc.buf.Len() - 1)
-	}
+	// trim space
+	enc.buf = bytes.TrimSpace(enc.buf)
 
 	// concatenate the buffers together before writing to out, so the entire
 	// log line is written in a single Write call
@@ -315,28 +356,15 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 }
 
 type encodeState struct {
-	groupStart   int
+	// index in buffer of where the currently open group started.
+	// if group ends up being elided, buffer will rollback to this
+	// index
+	groupStart int
+	// whether any field in this group has not been elided.  When a group
+	// closes, if this is false, the entire group will be elided
 	printedField bool
-	// True if the last field was not elided.  When anchored is true, the
-	// next pending space will not be elided
-	anchored bool
-	// Track if we need to print a space from a previous spacerField
-	spacePending bool
-}
 
-func endsWithSpace(s string) bool {
-	return len(s) > 0 && s[len(s)-1] == ' '
-}
-
-func startsWithSingleSpace(s string) bool {
-	lf := len(s)
-	if lf == 1 && s[0] == ' ' {
-		return true
-	}
-	if lf > 1 && s[0] == ' ' && s[1] != ' ' {
-		return true
-	}
-	return false
+	anchored, trailingSpace, pendingSpace bool
 }
 
 // WithAttrs implements slog.Handler.

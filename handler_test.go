@@ -716,88 +716,62 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 }
 
 func TestHandler_CollapseSpaces(t *testing.T) {
-	tests := []handlerTest{
-		{
-			name: "simple",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "two fields",
-			opts: HandlerOptions{HeaderFormat: "%l %t"},
-			want: "INF\n",
-		},
-		{
-			name: "two missing fields",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "adjacent missing fields",
-			opts: HandlerOptions{HeaderFormat: "%l %t%t > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "fields in a group",
-			opts: HandlerOptions{HeaderFormat: "%l %{%t%t%} > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "groups and spaces",
-			opts: HandlerOptions{HeaderFormat: "%l %{ %t %t > %} %m"},
-			want: "INF collapse spaces\n",
-		},
-		{
-			name: "leading space is trimmed",
-			opts: HandlerOptions{HeaderFormat: " %t %t %l > %t > %m"},
-			want: "INF > > collapse spaces\n",
-		},
-		{
-			name: "first field is elided",
-			opts: HandlerOptions{HeaderFormat: " %t %l > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "extra space is elided",
-			opts: HandlerOptions{HeaderFormat: "%t  %t   %l >  %t > %m"},
-			want: "INF > > collapse spaces\n",
-		},
-		{
-			name: "groups",
-			opts: HandlerOptions{HeaderFormat: "%l %{[%t][%l][%t]%} > %m"},
-			want: "INF [][INF][] > collapse spaces\n",
-		},
-		{
-			name: "more groups",
-			opts: HandlerOptions{HeaderFormat: "%l %{[%t]%}%{[%l]%}%{[%t]%} > %m"},
-			want: "INF [INF] > collapse spaces\n",
-		},
-		{
-			name: "elided group starts after a non-space, and ends with a space",
-			opts: HandlerOptions{HeaderFormat: "%l%{%t %} > %m"},
-			want: "INF > collapse spaces\n",
-		},
-		{
-			name: "empty padded header should not elide surrounding spaces",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]5h > %m"},
-			want: "INF       > collapse spaces\n",
-		},
-		{
-			name: "space between fields",
-			opts: HandlerOptions{HeaderFormat: "%l [%[foo]h %[bar]h] > %m"},
-			want: "INF [] > collapse spaces\n",
-		},
-		{
-			name: "space between and around fields",
-			opts: HandlerOptions{HeaderFormat: "%l [ %[foo]h %[bar]h ] > %m"},
-			want: "INF [ ] > collapse spaces\n",
-		},
+	tests2 := []struct {
+		desc, format, want string
+	}{
+		{"default", "", "INF > msg"},
+		{"trailing space", "%l ", "INF"},
+		{"trailing space", "%l %t ", "INF"},
+		{"leading space", " %l", "INF"},
+		{"leading space", " %t %l", "INF"},
+		{"unanchored", "%l%t %t%l", "INF INF"},
+		{"unanchored", "%l%t %l", "INF INF"},
+		{"unanchored", "%l %t%l", "INF INF"},
+		{"unanchored", "%l %t %l", "INF INF"},
+		{"unanchored", "%l %t %t %l", "INF INF"},
+		{"unanchored", "%l %t", "INF"},
+		{"unanchored", "%t %l", "INF"},
+		{"unanchored", "%l %t%t %l", "INF INF"},
+		{"unanchored", "[%l %t]", "[INF]"},
+		{"unanchored", "[%t %l]", "[INF]"},
+		{"unanchored", "[%l %t %l]", "[INF INF]"},
+		{"unanchored", "[%l%t %l]", "[INF INF]"},
+		{"unanchored", "[%l %t%l]", "[INF INF]"},
+		{"unanchored", "[%l%t %t%l]", "[INF INF]"},
+		{"extra spaces", "  %l    %t  %t %l   ", "INF INF"},
+		{"anchored", "%l %t > %m", "INF > msg"},
+		{"anchored", "[%l] [%t] > %m", "[INF] [] > msg"},
+		{"anchored", "[ %l %t]", "[ INF]"},
+		{"anchored", "[%l %t ]", "[INF ]"},
+		{"anchored", "[%t]", "[]"},
+		{"anchored", "[ %t ]", "[ ]"},
+		{"groups", "%l %{%t%} %l", "INF INF"},
+		{"groups", "%l %{ %t %} %l", "INF INF"},
+		{"groups", "%l %{ %t %l%} %l", "INF INF INF"},
+		{"groups", "%l %{ %t %l %} %l", "INF INF INF"},
+		{"groups", "%l %{%l %t %l %} %l", "INF INF INF INF"},
+		{"groups", "%l %{ %l %t %l %} %l", "INF INF INF INF"},
+		{"groups", "%l %{ %t %t %t %} %l", "INF INF"},
+		{"groups", "%l%{%t %} > %m", "INF > msg"},
+		{"groups", "%l%{ %t %}%l", "INFINF"},
+		{"groups with strings", "%l %{> %t %} %l", "INF INF"},
+		{"groups with strings", "%l %{> %t %t %} %l", "INF INF"},
+		{"groups with strings", "%l %{%t %t > %} %l", "INF INF"},
+		{"groups with strings", "%l %{[%t][%l][%t]%} > ", "INF [][INF][] >"},
+		{"groups with strings", "%l %{[%t]%}%{[%l]%}%{[%t]%} > %m", "INF [INF] > msg"},
+		{"padded header", "%l %[foo]5h > %m", "INF       > msg"},
+		{"nested groups", "%l %{ %{ %{ %t %} %} %} > %m", "INF > msg"},
+		{"nested groups", "%l%{ %{ %{%t%}%}%} > %m", "INF > msg"},
+		{"deeply nested groups", "%l%{ %{ %{ %{ %{ %{ %t %} %} %} %} %} %} > %m", "INF > msg"},
 	}
 
-	for _, tt := range tests {
-		tt.msg = "collapse spaces"
-		tt.opts.NoColor = true
-		tt.runSubtest(t)
+	for _, tt := range tests2 {
+		handlerTest{
+			name: tt.desc,
+			msg:  "msg",
+			opts: HandlerOptions{HeaderFormat: tt.format, NoColor: true},
+			want: tt.want + "\n",
+		}.runSubtest(t)
 	}
 }
 
@@ -1166,7 +1140,6 @@ type handlerTest struct {
 	handlerFunc func(h slog.Handler) slog.Handler
 	recFunc     func(r *slog.Record)
 	want        string
-	wantErr     string
 }
 
 func (ht handlerTest) runSubtest(t *testing.T) {
@@ -1193,13 +1166,9 @@ func (ht handlerTest) run(t *testing.T) {
 	}
 
 	err := h.Handle(context.Background(), rec)
-	if ht.wantErr != "" {
-		AssertError(t, err)
-		AssertEqual(t, ht.wantErr, err.Error())
-	} else {
-		AssertNoError(t, err)
-		AssertEqual(t, ht.want, buf.String())
-	}
+	t.Log("format:", ht.opts.HeaderFormat)
+	AssertNoError(t, err)
+	AssertEqual(t, ht.want, buf.String())
 }
 
 func TestHandler_writerErr(t *testing.T) {
