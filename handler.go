@@ -440,28 +440,6 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 	return newFields
 }
 
-// ParseFormatResult contains the parsed fields and header count from a format string
-type ParseFormatResult struct {
-	Fields      []any
-	HeaderCount int
-}
-
-// Equal compares two ParseFormatResults for equality
-func (p ParseFormatResult) Equal(other ParseFormatResult) bool {
-	if p.HeaderCount != other.HeaderCount {
-		return false
-	}
-	if len(p.Fields) != len(other.Fields) {
-		return false
-	}
-	for i := range p.Fields {
-		if fmt.Sprintf("%#v", p.Fields[i]) != fmt.Sprintf("%#v", other.Fields[i]) {
-			return false
-		}
-	}
-	return true
-}
-
 // parseFormat parses a format string into a list of fields and the number of headerFields.
 // Supported format verbs:
 // %t - timestampField

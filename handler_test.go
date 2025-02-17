@@ -16,6 +16,34 @@ import (
 	"time"
 )
 
+func TestNewHandler(t *testing.T) {
+	h := NewHandler(nil, nil)
+	AssertEqual(t, time.DateTime, h.opts.TimeFormat)
+	AssertEqual(t, NewDefaultTheme().Name(), h.opts.Theme.Name())
+	AssertEqual(t, defaultHeaderFormat, h.opts.HeaderFormat)
+}
+
+func TestHandler_Enabled(t *testing.T) {
+	tests := []slog.Level{
+		slog.LevelDebug - 1, slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError, slog.LevelError + 1,
+	}
+
+	for _, lvl := range tests {
+		t.Run(lvl.String(), func(t *testing.T) {
+			h := NewHandler(io.Discard, &HandlerOptions{Level: lvl})
+			if h.Enabled(context.Background(), lvl-1) {
+				t.Errorf("Expected %v to be disabled, got: enabled", lvl-1)
+			}
+			if !h.Enabled(context.Background(), lvl) {
+				t.Errorf("Expected %v to be enabled, got: disabled", lvl)
+			}
+			if !h.Enabled(context.Background(), lvl+1) {
+				t.Errorf("Expected %v to be enabled, got: disabled", lvl+1)
+			}
+		})
+	}
+}
+
 func TestHandler_TimeFormat(t *testing.T) {
 	testTime := time.Date(2024, 01, 02, 15, 04, 05, 123456789, time.UTC)
 	tests := []struct {
@@ -556,6 +584,11 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 			want:        "INF " + sourceField + " > foobar size=12 color=red\n",
 		},
 		{
+			name:        "clear timestamp attr",
+			replaceAttr: replaceAttrWith(slog.TimeKey, slog.Attr{}),
+			want:        "INF " + sourceField + " > foobar size=12 color=red\n",
+		},
+		{
 			name:        "replace timestamp",
 			replaceAttr: replaceAttrWith(slog.TimeKey, slog.Time(slog.TimeKey, time.Date(2000, 2, 3, 4, 5, 6, 0, time.UTC))),
 			want:        "2000-02-03 04:05:06 INF " + sourceField + " > foobar size=12 color=red\n",
@@ -715,6 +748,88 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 
 }
 
+func TestHandler_TruncateSourcePath(t *testing.T) {
+	origCwd := cwd
+	t.Cleanup(func() { cwd = origCwd })
+
+	cwd = "/usr/share/proj"
+	absSource := slog.Source{
+		File: "/var/proj/red/blue/green/yellow/main.go",
+		Line: 23,
+	}
+	relSource := slog.Source{
+		File: "/usr/share/proj/red/blue/green/yellow/main.go",
+		Line: 23,
+	}
+
+	tests := []handlerTest{
+		{
+			name:  "abs 1",
+			opts:  HandlerOptions{TruncateSourcePath: 1},
+			attrs: []slog.Attr{slog.Any("source", &absSource)},
+			want:  "INF main.go:23 >",
+		},
+		{
+			name:  "abs 2",
+			opts:  HandlerOptions{TruncateSourcePath: 2},
+			attrs: []slog.Attr{slog.Any("source", &absSource)},
+			want:  "INF yellow/main.go:23 >",
+		},
+		{
+			name:  "abs 3",
+			opts:  HandlerOptions{TruncateSourcePath: 3},
+			attrs: []slog.Attr{slog.Any("source", &absSource)},
+			want:  "INF green/yellow/main.go:23 >",
+		},
+		{
+			name:  "abs 4",
+			opts:  HandlerOptions{TruncateSourcePath: 4},
+			attrs: []slog.Attr{slog.Any("source", &absSource)},
+			want:  "INF blue/green/yellow/main.go:23 >",
+		},
+		{
+			name:  "default",
+			attrs: []slog.Attr{slog.Any("source", &absSource)},
+			want:  "INF /var/proj/red/blue/green/yellow/main.go:23 >",
+		},
+		{
+			name:  "relative",
+			attrs: []slog.Attr{slog.Any("source", &relSource)},
+			want:  "INF red/blue/green/yellow/main.go:23 >",
+		},
+		{
+			name:  "relative 1",
+			opts:  HandlerOptions{TruncateSourcePath: 1},
+			attrs: []slog.Attr{slog.Any("source", &relSource)},
+			want:  "INF main.go:23 >",
+		},
+		{
+			name:  "relative 2",
+			opts:  HandlerOptions{TruncateSourcePath: 2},
+			attrs: []slog.Attr{slog.Any("source", &relSource)},
+			want:  "INF yellow/main.go:23 >",
+		},
+		{
+			name:  "relative 3",
+			opts:  HandlerOptions{TruncateSourcePath: 3},
+			attrs: []slog.Attr{slog.Any("source", &relSource)},
+			want:  "INF green/yellow/main.go:23 >",
+		},
+		{
+			name:  "relative 4",
+			opts:  HandlerOptions{TruncateSourcePath: 4},
+			attrs: []slog.Attr{slog.Any("source", &relSource)},
+			want:  "INF blue/green/yellow/main.go:23 >",
+		},
+	}
+
+	for _, tt := range tests {
+		tt.opts.NoColor = true
+		tt.want += "\n"
+		tt.runSubtest(t)
+	}
+}
+
 func TestHandler_CollapseSpaces(t *testing.T) {
 	tests2 := []struct {
 		desc, format, want string
@@ -804,6 +919,16 @@ func TestHandler_HeaderFormat_Groups(t *testing.T) {
 			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
 			attrs: []slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")},
 			want:  "INF [bar baz] > groups\n",
+		},
+		{
+			name: "open group not closed",
+			opts: HandlerOptions{HeaderFormat: "%l %{ > %m"},
+			want: "INF > groups\n",
+		},
+		{
+			name: "closed group not opened",
+			opts: HandlerOptions{HeaderFormat: "%l %} > %m"},
+			want: "INF > groups\n",
 		},
 	}
 
@@ -1043,6 +1168,12 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		{
 			name:  "missing verb",
 			opts:  HandlerOptions{HeaderFormat: "%m %", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "with headers %!(MISSING_VERB) foo=bar\n",
+		},
+		{
+			name:  "missing verb with modifiers",
+			opts:  HandlerOptions{HeaderFormat: "%m %[slog]+-4", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!(MISSING_VERB) foo=bar\n",
 		},
