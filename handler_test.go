@@ -1182,7 +1182,6 @@ func TestThemes(t *testing.T) {
 	for _, theme := range []Theme{
 		NewDefaultTheme(),
 		NewBrightTheme(),
-		NewDimTheme(),
 	} {
 		t.Run(theme.Name(), func(t *testing.T) {
 			level := slog.LevelInfo

@@ -122,9 +122,9 @@ func NewDefaultTheme() Theme {
 		timestamp:      ToANSICode(BrightBlack),
 		header:         ToANSICode(Bold, BrightBlack),
 		message:        ToANSICode(Bold),
-		messageDebug:   ToANSICode(),
-		attrKey:        ToANSICode(Cyan),
-		attrValue:      ToANSICode(Gray),
+		messageDebug:   ToANSICode(Bold),
+		attrKey:        ToANSICode(Faint, Cyan),
+		attrValue:      ToANSICode(Faint),
 		attrValueError: ToANSICode(Bold, Red),
 		levelError:     ToANSICode(Red),
 		levelWarn:      ToANSICode(Yellow),
@@ -146,23 +146,6 @@ func NewBrightTheme() Theme {
 		levelError:     ToANSICode(BrightRed),
 		levelWarn:      ToANSICode(BrightYellow),
 		levelInfo:      ToANSICode(BrightGreen),
-		levelDebug:     ToANSICode(),
-	}
-}
-
-func NewDimTheme() Theme {
-	return ThemeDef{
-		name:           "Dim",
-		timestamp:      ToANSICode(Faint),
-		header:         ToANSICode(Bold, Faint),
-		message:        ToANSICode(Bold),
-		messageDebug:   ToANSICode(Bold),
-		attrKey:        ToANSICode(Faint, Cyan),
-		attrValue:      ToANSICode(Faint),
-		attrValueError: ToANSICode(Bold, Red),
-		levelError:     ToANSICode(Bold, Red),
-		levelWarn:      ToANSICode(Bold, Yellow),
-		levelInfo:      ToANSICode(Bold, Green),
 		levelDebug:     ToANSICode(),
 	}
 }
