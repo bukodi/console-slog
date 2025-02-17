@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -260,7 +261,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		switch f := f.(type) {
 		case groupOpen:
 			stack = append(stack, state)
-			state.groupStart = enc.buf.Len()
+			state.groupStart = len(enc.buf)
 			state.printedField = false
 			continue
 		case groupClose:
@@ -278,7 +279,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				// no fields were printed in this group, so
 				// rollback the entire group and pop back to
 				// the outer state
-				enc.buf.Truncate(state.groupStart)
+				enc.buf = enc.buf[:state.groupStart]
 				state = stack[len(stack)-1]
 			}
 			// pop a state off the stack
@@ -314,7 +315,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		if state.pendingSpace || state.pendingHardSpace {
 			enc.buf.AppendByte(' ')
 		}
-		l := enc.buf.Len()
+		l := len(enc.buf)
 		switch f := f.(type) {
 		case headerField:
 			hf := h.headerFields[headerIdx]
@@ -332,7 +333,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		case timestampField:
 			enc.encodeTimestamp(rec.Time)
 		}
-		printed := enc.buf.Len() > l
+		printed := len(enc.buf) > l
 		state.printedField = state.printedField || printed
 		if printed {
 			state.pendingSpace = false
@@ -348,8 +349,8 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 
 	// concatenate the buffers together before writing to out, so the entire
 	// log line is written in a single Write call
-	enc.buf.copy(&enc.attrBuf)
-	enc.buf.copy(&enc.multilineAttrBuf)
+	enc.buf.Append(enc.attrBuf)
+	enc.buf.Append(enc.multilineAttrBuf)
 	enc.buf.AppendByte('\n')
 
 	if _, err := enc.buf.WriteTo(h.out); err != nil {
@@ -386,11 +387,11 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	newMultiCtx := h.multilineContext
 	if len(enc.attrBuf) > 0 {
 		newCtx = append(newCtx, enc.attrBuf...)
-		newCtx.Clip()
+		newCtx = slices.Clip(newCtx)
 	}
 	if len(enc.multilineAttrBuf) > 0 {
 		newMultiCtx = append(newMultiCtx, enc.multilineAttrBuf...)
-		newMultiCtx.Clip()
+		newMultiCtx = slices.Clip(newMultiCtx)
 	}
 
 	enc.free()

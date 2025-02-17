@@ -2,6 +2,7 @@ package console
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 	"time"
 )
@@ -43,8 +44,7 @@ func BenchmarkDuration(b *testing.B) {
 	})
 
 	b.Run("append", func(b *testing.B) {
-		w := new(buffer)
-		w.Grow(2048)
+		w := slices.Grow(buffer{}, 2048)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			w.AppendDuration(d)

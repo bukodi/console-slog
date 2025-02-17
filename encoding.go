@@ -120,26 +120,26 @@ func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {
 	}
 
 	e.withColor(&e.buf, e.h.opts.Theme.Header(), func() {
-		l := e.buf.Len()
+		l := len(e.buf)
 		e.writeValue(&e.buf, a.Value)
 		if width <= 0 {
 			return
 		}
 		// truncate or pad to required width
-		remainingWidth := l + width - e.buf.Len()
+		remainingWidth := l + width - len(e.buf)
 		if remainingWidth < 0 {
 			// truncate
-			e.buf.Truncate(l + width)
+			e.buf = e.buf[:l+width]
 		} else if remainingWidth > 0 {
 			if rightAlign {
 				// For right alignment, shift the text right in-place:
 				// 1. Get the text length
-				textLen := e.buf.Len() - l
+				textLen := len(e.buf) - l
 				// 2. Add padding to reach final width
 				e.buf.Pad(remainingWidth, ' ')
 				// 3. Move the text to the right by copying from end to start
 				for i := 0; i < textLen; i++ {
-					e.buf[e.buf.Len()-1-i] = e.buf[l+textLen-1-i]
+					e.buf[len(e.buf)-1-i] = e.buf[l+textLen-1-i]
 				}
 				// 4. Fill the left side with spaces
 				for i := 0; i < remainingWidth; i++ {
@@ -269,7 +269,7 @@ func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
 		}
 	}
 
-	offset := e.attrBuf.Len()
+	offset := len(e.attrBuf)
 	e.writeAttr(&e.attrBuf, a, groupPrefix)
 
 	// check if the last attr written has newlines in it

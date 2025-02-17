@@ -2,41 +2,20 @@ package console
 
 import (
 	"io"
-	"slices"
 	"strconv"
 	"time"
 )
 
 type buffer []byte
 
-func (b *buffer) Grow(n int) {
-	*b = slices.Grow(*b, n)
-}
-
-func (b *buffer) Bytes() []byte {
-	return *b
-}
-
 func (b *buffer) String() string {
 	return string(*b)
-}
-
-func (b *buffer) Len() int {
-	return len(*b)
-}
-
-func (b *buffer) Truncate(n int) {
-	*b = (*b)[:n]
 }
 
 func (b *buffer) Pad(n int, c byte) {
 	for ; n > 0; n-- {
 		b.AppendByte(byte(c))
 	}
-}
-
-func (b *buffer) Cap() int {
-	return cap(*b)
 }
 
 func (b *buffer) WriteTo(dst io.Writer) (int64, error) {
@@ -70,20 +49,6 @@ func (b *buffer) Reset() {
 	*b = (*b)[:0]
 }
 
-func (b *buffer) Clone() buffer {
-	return append(buffer(nil), *b...)
-}
-
-func (b *buffer) Clip() {
-	*b = slices.Clip(*b)
-}
-
-func (b *buffer) copy(src *buffer) {
-	if src.Len() > 0 {
-		b.Append(src.Bytes())
-	}
-}
-
 func (b *buffer) Append(data []byte) {
 	*b = append(*b, data...)
 }
@@ -91,10 +56,6 @@ func (b *buffer) Append(data []byte) {
 func (b *buffer) AppendString(s string) {
 	*b = append(*b, s...)
 }
-
-// func (b *buffer) AppendQuotedString(s string) {
-// 	b.buff = strconv.AppendQuote(b.buff, s)
-// }
 
 func (b *buffer) AppendByte(byt byte) {
 	*b = append(*b, byt)
