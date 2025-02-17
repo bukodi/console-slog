@@ -13,7 +13,6 @@ func main() {
 		console.NewHandler(os.Stderr, &console.HandlerOptions{
 			Level:              slog.LevelDebug,
 			AddSource:          true,
-			HeaderFormat:       "%t %l %[logger]12h > %m",
 			TruncateSourcePath: 2,
 			TimeFormat:         "15:04:05.000",
 			Theme:              console.NewDimTheme(),

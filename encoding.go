@@ -119,7 +119,7 @@ func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {
 		return
 	}
 
-	e.withColor(&e.buf, e.h.opts.Theme.Source(), func() {
+	e.withColor(&e.buf, e.h.opts.Theme.Header(), func() {
 		l := e.buf.Len()
 		e.writeValue(&e.buf, a.Value)
 		if width <= 0 {

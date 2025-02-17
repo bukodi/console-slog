@@ -80,7 +80,7 @@ func TestHandler_TimeZero(t *testing.T) {
 	handlerTest{
 		opts: HandlerOptions{TimeFormat: time.RFC3339Nano, NoColor: true},
 		msg:  "foobar",
-		want: "INF > foobar\n",
+		want: "INF foobar\n",
 	}.run(t)
 }
 
@@ -147,7 +147,7 @@ func TestHandler_Attr(t *testing.T) {
 			slog.Attr{},
 			slog.Any("", nil),
 		},
-		want: "2024-01-02 15:04:05 INF > foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=2024-01-02 15:04:05 dur=1s group.foo=bar group.subgroup.foo=bar err=the error formattedError=formatted the error stringer=stringer nostringer={bar} valuer=The word is 'distant'\n",
+		want: "2024-01-02 15:04:05 INF foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=2024-01-02 15:04:05 dur=1s group.foo=bar group.subgroup.foo=bar err=the error formattedError=formatted the error stringer=stringer nostringer={bar} valuer=The word is 'distant'\n",
 	}.run(t)
 }
 
@@ -158,7 +158,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 			attrs: []slog.Attr{
 				slog.String("foo", "line one\nline two"),
 			},
-			want: "INF > multiline attrs foo=line one\nline two\n",
+			want: "INF multiline attrs foo=line one\nline two\n",
 		},
 		{
 			name: "multiple attrs",
@@ -166,7 +166,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 				slog.String("foo", "line one\nline two"),
 				slog.String("bar", "line three\nline four"),
 			},
-			want: "INF > multiline attrs foo=line one\nline two bar=line three\nline four\n",
+			want: "INF multiline attrs foo=line one\nline two bar=line three\nline four\n",
 		},
 		{
 			name: "sort multiline attrs to end",
@@ -177,19 +177,19 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 				slog.String("bar", "line three\nline four"),
 				slog.String("color", "red"),
 			},
-			want: "INF > multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
+			want: "INF multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
 		},
 		{
 			name: "multiline message",
 			msg:  "multiline\nmessage",
-			want: "INF > multiline\nmessage\n",
+			want: "INF multiline\nmessage\n",
 		},
 		{
 			name: "preserve leading and trailing newlines",
 			attrs: []slog.Attr{
 				slog.String("foo", "\nline one\nline two\n"),
 			},
-			want: "INF > multiline attrs foo=\nline one\nline two\n\n",
+			want: "INF multiline attrs foo=\nline one\nline two\n\n",
 		},
 		{
 			name: "multiline attr using WithAttrs",
@@ -199,7 +199,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 				})
 			},
 			attrs: []slog.Attr{slog.String("bar", "baz")},
-			want:  "INF > multiline attrs bar=baz foo=line one\nline two\n",
+			want:  "INF multiline attrs bar=baz foo=line one\nline two\n",
 		},
 		{
 			name: "multiline header value",
@@ -227,7 +227,7 @@ func TestHandler_Groups(t *testing.T) {
 			attrs: []slog.Attr{
 				slog.Group("group", slog.String("foo", "bar")),
 			},
-			want: "INF > single group group.foo=bar\n",
+			want: "INF single group group.foo=bar\n",
 		},
 		{
 			// '- If a group has no Attrs (even if it has a non-empty key), ignore it.'
@@ -237,7 +237,7 @@ func TestHandler_Groups(t *testing.T) {
 				slog.Group("group", slog.String("foo", "bar")),
 				slog.Group("empty"),
 			},
-			want: "INF > empty groups should be elided group.foo=bar\n",
+			want: "INF empty groups should be elided group.foo=bar\n",
 		},
 		{
 			// Handlers should expand groups named "" (the empty string) into the enclosing log record.
@@ -248,7 +248,7 @@ func TestHandler_Groups(t *testing.T) {
 				slog.Group("group", slog.String("foo", "bar")),
 				slog.Group("", slog.String("foo", "bar")),
 			},
-			want: "INF > inline group group.foo=bar foo=bar\n",
+			want: "INF inline group group.foo=bar foo=bar\n",
 		},
 		{
 			// A Handler should call Resolve on attribute values in groups.
@@ -257,7 +257,7 @@ func TestHandler_Groups(t *testing.T) {
 			attrs: []slog.Attr{
 				slog.Group("group", "stringer", theStringer{}, "valuer", &theValuer{"surreal"}),
 			},
-			want: "INF > groups with valuer members group.stringer=stringer group.valuer=The word is 'surreal'\n",
+			want: "INF groups with valuer members group.stringer=stringer group.valuer=The word is 'surreal'\n",
 		},
 	}
 
@@ -301,7 +301,7 @@ func TestHandler_WithAttr(t *testing.T) {
 			},
 			msg:  "foobar",
 			time: testTime,
-			want: "2024-01-02 15:04:05 INF > foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=2024-01-02 15:04:05 dur=1s stringer=stringer valuer=The word is 'awesome' group.foo=bar group.subgroup.foo=bar group.stringer=stringer group.valuer=The word is 'pizza'\n",
+			want: "2024-01-02 15:04:05 INF foobar bool=true int=-12 uint=12 float=3.14 foo=bar time=2024-01-02 15:04:05 dur=1s stringer=stringer valuer=The word is 'awesome' group.foo=bar group.subgroup.foo=bar group.stringer=stringer group.valuer=The word is 'pizza'\n",
 		},
 		{
 			name: "multiple withAttrs",
@@ -312,7 +312,7 @@ func TestHandler_WithAttr(t *testing.T) {
 					slog.String("baz", "buz"),
 				})
 			},
-			want: "INF > multiple withAttrs foo=bar baz=buz\n",
+			want: "INF multiple withAttrs foo=bar baz=buz\n",
 		},
 		{
 			name: "withAttrs and headers",
@@ -382,7 +382,7 @@ func TestHandler_WithGroup(t *testing.T) {
 				return h.WithGroup("group1")
 			},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "INF > withGroup group1.foo=bar\n",
+			want:  "INF withGroup group1.foo=bar\n",
 		},
 		{
 			name: "withGroup and headers",
@@ -398,7 +398,7 @@ func TestHandler_WithGroup(t *testing.T) {
 				return h.WithAttrs([]slog.Attr{slog.String("bar", "baz")}).WithGroup("group1").WithAttrs([]slog.Attr{slog.String("foo", "bar")})
 			},
 			attrs: []slog.Attr{slog.String("baz", "foo")},
-			want:  "INF > withGroup and withAttrs bar=baz group1.foo=bar group1.baz=foo\n",
+			want:  "INF withGroup and withAttrs bar=baz group1.foo=bar group1.baz=foo\n",
 		},
 	}
 
@@ -504,7 +504,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 				r.Time = time.Time{}
 			},
 			noSource: true,
-			want:     "INF > foobar size=12 color=red\n",
+			want:     "INF foobar size=12 color=red\n",
 			replaceAttr: func(t *testing.T, s []string, a slog.Attr) slog.Attr {
 				switch a.Key {
 				case slog.TimeKey, slog.SourceKey:
@@ -603,7 +603,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 		{
 			name:        "clear source",
 			replaceAttr: replaceAttrWith(slog.SourceKey, slog.Any(slog.SourceKey, nil)),
-			want:        "2010-05-06 07:08:09 INF > foobar size=12 color=red\n",
+			want:        "2010-05-06 07:08:09 INF foobar size=12 color=red\n",
 		},
 		{
 			name: "replace source",
@@ -640,7 +640,7 @@ func TestHandler_ReplaceAttr(t *testing.T) {
 				}
 				return a
 			},
-			want: "2010-05-06 07:08:09 INF > foobar size=12 color=red\n",
+			want: "2010-05-06 07:08:09 INF foobar size=12 color=red\n",
 		},
 		{
 			name:        "clear message",
@@ -719,7 +719,7 @@ func TestHandler_CollapseSpaces(t *testing.T) {
 	tests2 := []struct {
 		desc, format, want string
 	}{
-		{"default", "", "INF > msg"},
+		{"default", "", "INF msg"},
 		{"trailing space", "%l ", "INF"},
 		{"trailing space", "%l %t ", "INF"},
 		{"leading space", " %l", "INF"},
@@ -1233,8 +1233,9 @@ func TestThemes(t *testing.T) {
 					}
 
 					// Source
-					if theme.Source() != "" {
-						checkANSIMod(t, "Source", theme.Source())
+					if theme.Header() != "" {
+						checkANSIMod(t, "Header", theme.Header())
+						checkANSIMod(t, "Header", theme.Header())
 						// checkANSIMod(t, "AttrKey", theme.AttrKey())
 					}
 

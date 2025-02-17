@@ -124,7 +124,7 @@ type HandlerOptions struct {
 	HeaderFormat string
 }
 
-const defaultHeaderFormat = "%t %l %[source]h > %m"
+const defaultHeaderFormat = "%t %l %{%[source]h >%} %m"
 
 type Handler struct {
 	opts                      HandlerOptions
@@ -182,6 +182,35 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 
 	fields, headerFields := parseFormat(opts.HeaderFormat)
 
+	// find spocerFields adjacent to string fields and mark them
+	// as hard spaces.  hard spaces should not be skipped, only
+	// coalesced
+	var wasString bool
+	lastSpace := -1
+	for i, f := range fields {
+		switch f.(type) {
+		case headerField, levelField, messageField, timestampField:
+			wasString = false
+			lastSpace = -1
+		case string:
+			if lastSpace != -1 {
+				// string immediately followed space, so the
+				// space is hard.
+				fields[lastSpace] = spacerField{hard: true}
+			}
+			wasString = true
+			lastSpace = -1
+		case spacerField:
+			if wasString {
+				// space immedately followed a string, so the space
+				// is hard
+				fields[i] = spacerField{hard: true}
+			}
+			lastSpace = i
+			wasString = false
+		}
+	}
+
 	return &Handler{
 		opts:         *opts, // Copy struct
 		out:          out,
@@ -221,33 +250,6 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		enc.encodeAttr(h.groupPrefix, a)
 		return true
 	})
-
-	// todo: if we keep this, it needs to move into parseFormat or something
-	var wasString bool
-	lastSpace := -1
-	for i, f := range h.fields {
-		switch f.(type) {
-		case headerField, levelField, messageField, timestampField:
-			wasString = false
-			lastSpace = -1
-		case string:
-			if lastSpace != -1 {
-				// string immediately followed space, so the
-				// space is hard.
-				h.fields[lastSpace] = spacerField{hard: true}
-			}
-			wasString = true
-			lastSpace = -1
-		case spacerField:
-			if wasString {
-				// space immedately followed a string, so the space
-				// is hard
-				h.fields[i] = spacerField{hard: true}
-			}
-			lastSpace = i
-			wasString = false
-		}
-	}
 
 	headerIdx := 0
 	var state encodeState
@@ -304,7 +306,9 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			state.pendingHardSpace = false
 			state.pendingSpace = false
 			state.anchored = false
-			enc.buf.AppendString(f)
+			enc.withColor(&enc.buf, h.opts.Theme.Header(), func() {
+				enc.buf.AppendString(f)
+			})
 			continue
 		}
 		if state.pendingSpace || state.pendingHardSpace {
