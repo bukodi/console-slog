@@ -119,12 +119,12 @@ func (t ThemeDef) Level(level slog.Level) ANSIMod {
 func NewDefaultTheme() Theme {
 	return ThemeDef{
 		name:           "Default",
-		timestamp:      ToANSICode(BrightBlack),
-		header:         ToANSICode(Bold, BrightBlack),
+		timestamp:      ToANSICode(Faint),
+		header:         ToANSICode(Faint, Bold),
 		message:        ToANSICode(Bold),
 		messageDebug:   ToANSICode(Bold),
 		attrKey:        ToANSICode(Faint, Cyan),
-		attrValue:      ToANSICode(Faint),
+		attrValue:      ToANSICode(),
 		attrValueError: ToANSICode(Bold, Red),
 		levelError:     ToANSICode(Red),
 		levelWarn:      ToANSICode(Yellow),
