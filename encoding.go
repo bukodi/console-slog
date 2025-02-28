@@ -107,7 +107,7 @@ func (e *encoder) encodeMessage(level slog.Level, msg string) {
 		return
 	}
 
-	e.writeColoredString(&e.buf, msg, style)
+	e.writeColoredString(&e.buf, strings.TrimSpace(msg), style)
 }
 
 func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {

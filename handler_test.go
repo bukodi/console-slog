@@ -213,11 +213,11 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 			want: "INF multiline\nmessage\n",
 		},
 		{
-			name: "preserve leading and trailing newlines",
+			name: "trim leading and trailing newlines",
 			attrs: []slog.Attr{
 				slog.String("foo", "\nline one\nline two\n"),
 			},
-			want: "INF multiline attrs foo=\nline one\nline two\n\n",
+			want: "INF multiline attrs foo=\nline one\nline two\n",
 		},
 		{
 			name: "multiline attr using WithAttrs",
