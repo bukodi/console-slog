@@ -74,6 +74,8 @@ type HandlerOptions struct {
 	//	%l	     abbreviated level (e.g. "INF")
 	//	%L	     level (e.g. "INFO")
 	//	%m	     message
+	//	%s	       source (if omitted, source is just handled as an attribute)
+	//	%a	       attributes
 	//	%[key]h	 header with the given key.
 	//  %{       group open
 	//  %}       group close
@@ -125,7 +127,7 @@ type HandlerOptions struct {
 	HeaderFormat string
 }
 
-const defaultHeaderFormat = "%t %l %{%[source]h >%} %m"
+const defaultHeaderFormat = "%t %l %{%s >%} %m %a"
 
 type Handler struct {
 	opts                      HandlerOptions
@@ -135,9 +137,11 @@ type Handler struct {
 	context, multilineContext buffer
 	fields                    []any
 	headerFields              []headerField
+	sourceAsAttr              bool
 }
 
 type timestampField struct{}
+
 type headerField struct {
 	groupPrefix string
 	key         string
@@ -153,11 +157,15 @@ type levelField struct {
 type messageField struct{}
 
 type groupOpen struct{}
+type attrsField struct{}
+
 type groupClose struct{}
 
-type spacerField struct {
+type spacer struct {
 	hard bool
 }
+
+type sourceField struct{}
 
 var _ slog.Handler = (*Handler)(nil)
 
@@ -212,6 +220,16 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 		}
 	}
 
+	// Check if the parsed fields include any sourceField instances
+	// If not, set sourceAsAttr to true so source is handled as a regular attribute
+	sourceAsAttr := true
+	for _, f := range fields {
+		if _, ok := f.(sourceField); ok {
+			sourceAsAttr = false
+			break
+		}
+	}
+
 	return &Handler{
 		opts:         *opts, // Copy struct
 		out:          out,
@@ -219,6 +237,7 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 		context:      nil,
 		fields:       fields,
 		headerFields: headerFields,
+		sourceAsAttr: sourceAsAttr,
 	}
 }
 
@@ -230,18 +249,21 @@ func (h *Handler) Enabled(_ context.Context, l slog.Level) bool {
 func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	enc := newEncoder(h)
 
+	var src slog.Source
+
 	if h.opts.AddSource && rec.PC > 0 {
-		src := slog.Source{}
 		frame, _ := runtime.CallersFrames([]uintptr{rec.PC}).Next()
 		src.Function = frame.Function
 		src.File = frame.File
 		src.Line = frame.Line
+
+		if h.sourceAsAttr {
 		// the source attr should not be inside any open groups
 		groups := enc.groups
 		enc.groups = nil
 		enc.encodeAttr("", slog.Any(slog.SourceKey, &src))
 		enc.groups = groups
-		// rec.AddAttrs(slog.Any(slog.SourceKey, &src))
+		}
 	}
 
 	enc.attrBuf.Append(h.context)
@@ -330,6 +352,18 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			enc.encodeLevel(rec.Level, f.abbreviated)
 		case messageField:
 			enc.encodeMessage(rec.Level, rec.Message)
+		case attrsField:
+			// trim the attrBuf and multilineAttrBuf to remove leading spaces
+			// but leave a space between attrBuf and multilineAttrBuf
+			if len(enc.attrBuf) > 0 {
+				enc.attrBuf = bytes.TrimSpace(enc.attrBuf)
+			} else if len(enc.multilineAttrBuf) > 0 {
+				enc.multilineAttrBuf = bytes.TrimSpace(enc.multilineAttrBuf)
+			}
+			enc.buf.Append(enc.attrBuf)
+			enc.buf.Append(enc.multilineAttrBuf)
+		case sourceField:
+			enc.encodeSource(src)
 		case timestampField:
 			enc.encodeTimestamp(rec.Time)
 		}
@@ -347,10 +381,6 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		}
 	}
 
-	// concatenate the buffers together before writing to out, so the entire
-	// log line is written in a single Write call
-	enc.buf.Append(enc.attrBuf)
-	enc.buf.Append(enc.multilineAttrBuf)
 	enc.buf.AppendByte('\n')
 
 	if _, err := enc.buf.WriteTo(h.out); err != nil {
@@ -405,6 +435,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		groups:           h.groups,
 		fields:           h.fields,
 		headerFields:     headerFields,
+		sourceAsAttr:     h.sourceAsAttr,
 	}
 }
 
@@ -423,6 +454,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		groups:       append(h.groups, name),
 		fields:       h.fields,
 		headerFields: h.headerFields,
+		sourceAsAttr: h.sourceAsAttr,
 	}
 }
 
@@ -441,18 +473,25 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 }
 
 // parseFormat parses a format string into a list of fields and the number of headerFields.
+//
 // Supported format verbs:
+//
 // %t - timestampField
-// %h - headerField, requires [name] modifier, supports width, - and + modifiers
+//		%h	- headerField, requires the [name] modifier.
+//		      Supports width, right-alignment (-), and non-capturing (+) modifiers.
 // %m - messageField
-// %l - abbreviated levelField
-// %L - non-abbreviated levelField
+//		%l	- abbreviated levelField: The log level in abbreviated form (e.g., "INF").
+//		%L	- non-abbreviated levelField: The log level in full form (e.g., "INFO").
+//		%{	- groupOpen
+//		%}	- groupClose
+//	    %s  - sourceField
 //
 // Modifiers:
-// [name]: the key of the attribute to capture as a header, required
-// width: int fixed width, optional
-// -: for right alignment, optional
-// +: for non-capturing header, optional
+//
+//	[name] (for %h): The key of the attribute to capture as a header. This modifier is required for the %h verb.
+//	width (for %h): An integer specifying the fixed width of the header. This modifier is optional.
+//	- (for %h): Indicates right-alignment of the header. This modifier is optional.
+//	+ (for %h): Indicates a non-capturing header. This modifier is optional.
 //
 // Examples:
 //
@@ -463,13 +502,14 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //	"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
 //	"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
 //	"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
-//	"%t %l %[key]10+h %m"              // timestamp, level, captured header with key "key" and width 10, message
-//	"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned captured header with key "key" and width 10, message
+//			"%t %l %[key]10+h %m"              // timestamp, level, non-captured header with key "key" and width 10, message
+//			"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned non-captured header with key "key" and width 10, message
 //	"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
 //	"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
 //	"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
 //	"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
 //	"%% %t %l %m"                      // literal "%", timestamp, level, message
+//			"%t %l %s"                         // timestamp, level, source location (e.g., "file.go:123 functionName")
 //
 // Note that headers will "capture" their matching attribute by default, which means that attribute will not
 // be included in the attributes section of the log line, and will not be matched by subsequent header fields.
@@ -598,6 +638,10 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 			field = groupOpen{}
 		case '}':
 			field = groupClose{}
+		case 's':
+			field = sourceField{}
+		case 'a':
+			field = attrsField{}
 		default:
 			fields = append(fields, fmt.Sprintf("%%!%c(INVALID_VERB)", format[i]))
 			continue

@@ -92,7 +92,7 @@ func TestHandler_TimeFormat(t *testing.T) {
 			opts: HandlerOptions{
 				TimeFormat:   tt.timeFormat,
 				NoColor:      true,
-				HeaderFormat: "%t",
+				HeaderFormat: "%t %m %a",
 			},
 			attrs: tt.attrs,
 			want:  tt.want,
@@ -414,7 +414,7 @@ func TestHandler_WithGroup(t *testing.T) {
 		},
 		{
 			name: "withGroup and headers",
-			opts: HandlerOptions{HeaderFormat: "%l %[group1.foo]h %[bar]h > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %[group1.foo]h %[bar]h > %m %a"},
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1").WithAttrs([]slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")})
 			},
@@ -444,7 +444,7 @@ func TestHandler_WithGroup(t *testing.T) {
 
 		buf := bytes.Buffer{}
 		h := NewHandler(&buf, &HandlerOptions{
-			HeaderFormat: "%m",
+			HeaderFormat: "%m %a",
 			TimeFormat:   "0",
 			NoColor:      true,
 			// the only state which WithGroup() might corrupt is the list of groups
@@ -767,59 +767,59 @@ func TestHandler_TruncateSourcePath(t *testing.T) {
 			name:  "abs 1",
 			opts:  HandlerOptions{TruncateSourcePath: 1},
 			attrs: []slog.Attr{slog.Any("source", &absSource)},
-			want:  "INF main.go:23 >",
+			want:  "INF source=main.go:23",
 		},
 		{
 			name:  "abs 2",
 			opts:  HandlerOptions{TruncateSourcePath: 2},
 			attrs: []slog.Attr{slog.Any("source", &absSource)},
-			want:  "INF yellow/main.go:23 >",
+			want:  "INF source=yellow/main.go:23",
 		},
 		{
 			name:  "abs 3",
 			opts:  HandlerOptions{TruncateSourcePath: 3},
 			attrs: []slog.Attr{slog.Any("source", &absSource)},
-			want:  "INF green/yellow/main.go:23 >",
+			want:  "INF source=green/yellow/main.go:23",
 		},
 		{
 			name:  "abs 4",
 			opts:  HandlerOptions{TruncateSourcePath: 4},
 			attrs: []slog.Attr{slog.Any("source", &absSource)},
-			want:  "INF blue/green/yellow/main.go:23 >",
+			want:  "INF source=blue/green/yellow/main.go:23",
 		},
 		{
 			name:  "default",
 			attrs: []slog.Attr{slog.Any("source", &absSource)},
-			want:  "INF /var/proj/red/blue/green/yellow/main.go:23 >",
+			want:  "INF source=/var/proj/red/blue/green/yellow/main.go:23",
 		},
 		{
 			name:  "relative",
 			attrs: []slog.Attr{slog.Any("source", &relSource)},
-			want:  "INF red/blue/green/yellow/main.go:23 >",
+			want:  "INF source=red/blue/green/yellow/main.go:23",
 		},
 		{
 			name:  "relative 1",
 			opts:  HandlerOptions{TruncateSourcePath: 1},
 			attrs: []slog.Attr{slog.Any("source", &relSource)},
-			want:  "INF main.go:23 >",
+			want:  "INF source=main.go:23",
 		},
 		{
 			name:  "relative 2",
 			opts:  HandlerOptions{TruncateSourcePath: 2},
 			attrs: []slog.Attr{slog.Any("source", &relSource)},
-			want:  "INF yellow/main.go:23 >",
+			want:  "INF source=yellow/main.go:23",
 		},
 		{
 			name:  "relative 3",
 			opts:  HandlerOptions{TruncateSourcePath: 3},
 			attrs: []slog.Attr{slog.Any("source", &relSource)},
-			want:  "INF green/yellow/main.go:23 >",
+			want:  "INF source=green/yellow/main.go:23",
 		},
 		{
 			name:  "relative 4",
 			opts:  HandlerOptions{TruncateSourcePath: 4},
 			attrs: []slog.Attr{slog.Any("source", &relSource)},
-			want:  "INF blue/green/yellow/main.go:23 >",
+			want:  "INF source=blue/green/yellow/main.go:23",
 		},
 	}
 
@@ -960,7 +960,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name: "one header",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{
 				slog.String("foo", "bar"),
 				slog.String("bar", "baz"),
@@ -969,7 +969,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name: "two headers",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{
 				slog.String("foo", "bar"),
 				slog.String("bar", "baz"),
@@ -978,7 +978,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name: "two headers alt order",
-			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			opts: HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{
 				slog.String("bar", "baz"),
 				slog.String("foo", "bar"),
@@ -987,19 +987,19 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "missing headers",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[bar]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF bar > with headers\n", // missing headers are omitted
 		},
 		{
 			name:  "missing headers, no space",
-			opts:  HandlerOptions{HeaderFormat: "%l%[foo]h%[bar]h>%m", NoColor: true}, // no spaces between headers or level/message
+			opts:  HandlerOptions{HeaderFormat: "%l%[foo]h%[bar]h>%m %a", NoColor: true}, // no spaces between headers or level/message
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INFbar>with headers\n",
 		},
 		{
 			name:  "header without group prefix does not match attr in group",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h > %m %a", NoColor: true}, // header is an attribute inside a group
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1")
@@ -1008,7 +1008,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "header with group prefix",
-			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m %a", NoColor: true}, // header is an attribute inside a group
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1")
@@ -1017,7 +1017,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "header in nested groups",
-			opts:  HandlerOptions{HeaderFormat: "%l %[group1.group2.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1.group2.foo]h > %m %a", NoColor: true}, // header is an attribute inside a group
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1").WithGroup("group2")
@@ -1026,19 +1026,19 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "header in group attr, no match",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h > %m %a", NoColor: true}, // header is an attribute inside a group
 			attrs: []slog.Attr{slog.Group("group1", slog.String("foo", "bar"))},
 			want:  "INF > with headers group1.foo=bar\n",
 		},
 		{
 			name:  "header in group attr, match",
-			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m", NoColor: true}, // header is an attribute inside a group
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h > %m %a", NoColor: true}, // header is an attribute inside a group
 			attrs: []slog.Attr{slog.Group("group1", slog.String("foo", "bar"))},
 			want:  "INF bar > with headers\n",
 		},
 		{
 			name:  "header and withGroup and nested group",
-			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h %[group1.group2.bar]h > %m", NoColor: true}, // header is group2.attr0, attr0 is in root
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1.foo]h %[group1.group2.bar]h > %m %a", NoColor: true}, // header is group2.attr0, attr0 is in root
 			attrs: []slog.Attr{slog.String("foo", "bar"), slog.Group("group2", slog.String("bar", "baz"))},
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1")
@@ -1047,7 +1047,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "no header",
-			opts:  HandlerOptions{HeaderFormat: "%l > %m", NoColor: true}, // no header
+			opts:  HandlerOptions{HeaderFormat: "%l > %m %a", NoColor: true}, // no header
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF > with headers foo=bar\n",
 		},
@@ -1062,118 +1062,124 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			want: "with headers\n",
 		},
 		{
+			name:  "just attrs",
+			opts:  HandlerOptions{HeaderFormat: "%a", NoColor: true}, // just attrs
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "foo=bar\n",
+		},
+		{
 			name: "source not in the header",
 			handlerFunc: func(h slog.Handler) slog.Handler {
 				return h.WithGroup("group1").WithAttrs([]slog.Attr{slog.String("foo", "bar")})
 			},
-			opts: HandlerOptions{HeaderFormat: "%l > %m", NoColor: true, AddSource: true}, // header is foo, not source
+			opts: HandlerOptions{HeaderFormat: "%l > %m %a", NoColor: true, AddSource: true}, // header is foo, not source
 			want: "INF > with headers source=" + sourceField + " group1.foo=bar\n",
 		},
 		{
 			name:  "header matches a group attr should skip header",
 			attrs: []slog.Attr{slog.Group("group1", slog.String("foo", "bar"))},
-			opts:  HandlerOptions{HeaderFormat: "%l %[group1]h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[group1]h > %m %a", NoColor: true},
 			want:  "INF > with headers group1.foo=bar\n",
 		},
 		{
 			name:  "repeated header with capture",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[foo]h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]h %[foo]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF bar > with headers\n", // Second header is ignored since foo was captured by first header
 		},
 		{
 			name:  "non-capturing header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]h %[request_id]+h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[logger]h %[request_id]+h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("logger", "app"), slog.String("request_id", "123")},
 			want:  "INF app 123 > with headers request_id=123\n",
 		},
 		{
 			name:  "non-capturing header captured by another header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("logger", "app")},
 			want:  "INF app app > with headers\n",
 		},
 		{
 			name:  "multiple non-capturing headers matching same attr",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]+h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]+h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("logger", "app")},
 			want:  "INF app app > with headers logger=app\n",
 		},
 		{
 			name:  "repeated timestamp, level and message fields",
-			opts:  HandlerOptions{HeaderFormat: "%t %l %m %t %l %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%t %l %m %t %l %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "2024-01-02 15:04:05 INF with headers 2024-01-02 15:04:05 INF with headers foo=bar\n",
 		},
 		{
 			name:  "missing header and multiple spaces",
-			opts:  HandlerOptions{HeaderFormat: "%l   %[missing]h  %[foo]h  >  %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l   %[missing]h  %[foo]h  >  %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF bar > with headers\n",
 		},
 		{
 			name:  "fixed width header left aligned",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]10h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]10h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF bar        > with headers\n",
 		},
 		{
 			name:  "fixed width header right aligned",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]-10h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]-10h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF        bar > with headers\n",
 		},
 		{
 			name:  "fixed width header truncated",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]3h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]3h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "barbaz")},
 			want:  "INF bar > with headers\n",
 		},
 		{
 			name:  "fixed width header with spaces",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]10h %[bar]5h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]10h %[bar]5h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "hello"), slog.String("bar", "world")},
 			want:  "INF hello      world > with headers\n",
 		},
 		{
 			name:  "fixed width non-capturing header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]+-10h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[foo]+-10h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF        bar > with headers foo=bar\n",
 		},
 		{
 			name:  "fixed width header missing attr",
-			opts:  HandlerOptions{HeaderFormat: "%l %[missing]10h > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %[missing]10h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF            > with headers foo=bar\n",
 		},
 		{
 			name:  "non-abbreviated levels",
-			opts:  HandlerOptions{HeaderFormat: "%L > %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%L > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INFO > with headers foo=bar\n",
 		},
 		{
 			name:  "alternate text",
-			opts:  HandlerOptions{HeaderFormat: "prefix [%l] [%[foo]h] %m suffix > ", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "prefix [%l] [%[foo]h] %m suffix > %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "prefix [INF] [bar] with headers suffix >\n",
 		},
 		{
 			name:  "escaped percent",
-			opts:  HandlerOptions{HeaderFormat: "prefix %% [%l] %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "prefix %% [%l] %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "prefix % [INF] with headers foo=bar\n",
 		},
 		{
 			name:  "missing verb",
-			opts:  HandlerOptions{HeaderFormat: "%m %", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%m % %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!(MISSING_VERB) foo=bar\n",
 		},
 		{
 			name:  "missing verb with modifiers",
-			opts:  HandlerOptions{HeaderFormat: "%m %[slog]+-4", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%m %[slog]+-4 %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!(MISSING_VERB) foo=bar\n",
 		},
@@ -1185,25 +1191,25 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "invalid verb",
-			opts:  HandlerOptions{HeaderFormat: "%l %x %m", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%l %x %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF %!x(INVALID_VERB) with headers foo=bar\n",
 		},
 		{
 			name:  "missing header name",
-			opts:  HandlerOptions{HeaderFormat: "%m %h", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%m %h %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!h(MISSING_HEADER_NAME) foo=bar\n",
 		},
 		{
 			name:  "missing closing bracket in header",
-			opts:  HandlerOptions{HeaderFormat: "%m %[fooh >", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%m %[fooh > %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!(MISSING_CLOSING_BRACKET) > foo=bar\n",
 		},
 		{
 			name: "zero PC",
-			opts: HandlerOptions{HeaderFormat: "%l %[source]h > %m", NoColor: true, AddSource: true},
+			opts: HandlerOptions{HeaderFormat: "%l %[source]h > %m %a", NoColor: true, AddSource: true},
 			recFunc: func(r *slog.Record) {
 				r.PC = 0
 			},
@@ -1298,6 +1304,7 @@ func (ht handlerTest) run(t *testing.T) {
 
 	err := h.Handle(context.Background(), rec)
 	t.Log("format:", ht.opts.HeaderFormat)
+	t.Log(buf.String())
 	AssertNoError(t, err)
 	AssertEqual(t, ht.want, buf.String())
 }

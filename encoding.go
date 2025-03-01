@@ -229,6 +229,28 @@ func (e *encoder) encodeLevel(l slog.Level, abbreviated bool) {
 	}
 }
 
+func (e *encoder) encodeSource(src slog.Source) {
+	if src.File == "" && src.Line == 0 {
+		// elide empty source
+		return
+	}
+
+	v := slog.AnyValue(&src)
+
+	if e.h.opts.ReplaceAttr != nil {
+		attr := e.h.opts.ReplaceAttr(nil, slog.Attr{Key: slog.SourceKey, Value: v})
+		attr.Value = attr.Value.Resolve()
+
+		if attr.Value.Equal(slog.Value{}) {
+			// elide
+			return
+		}
+		v = attr.Value
+	}
+	// Use source style for the value
+	e.writeColoredValue(&e.buf, v, e.h.opts.Theme.Source())
+}
+
 func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
 
 	a.Value = a.Value.Resolve()

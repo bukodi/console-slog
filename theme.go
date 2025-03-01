@@ -63,7 +63,7 @@ type Theme interface {
 	Name() string
 	Timestamp() ANSIMod
 	Header() ANSIMod
-
+	Source() ANSIMod
 	Message() ANSIMod
 	MessageDebug() ANSIMod
 	AttrKey() ANSIMod
@@ -80,6 +80,7 @@ type ThemeDef struct {
 	name           string
 	timestamp      ANSIMod
 	header         ANSIMod
+	source         ANSIMod
 	message        ANSIMod
 	messageDebug   ANSIMod
 	attrKey        ANSIMod
@@ -94,6 +95,7 @@ type ThemeDef struct {
 func (t ThemeDef) Name() string            { return t.name }
 func (t ThemeDef) Timestamp() ANSIMod      { return t.timestamp }
 func (t ThemeDef) Header() ANSIMod         { return t.header }
+func (t ThemeDef) Source() ANSIMod         { return t.source }
 func (t ThemeDef) Message() ANSIMod        { return t.message }
 func (t ThemeDef) MessageDebug() ANSIMod   { return t.messageDebug }
 func (t ThemeDef) AttrKey() ANSIMod        { return t.attrKey }
@@ -121,6 +123,7 @@ func NewDefaultTheme() Theme {
 		name:           "Default",
 		timestamp:      ToANSICode(Faint),
 		header:         ToANSICode(Faint, Bold),
+		source:         ToANSICode(Faint, Italic),
 		message:        ToANSICode(Bold),
 		messageDebug:   ToANSICode(Bold),
 		attrKey:        ToANSICode(Faint, Cyan),
@@ -138,6 +141,7 @@ func NewBrightTheme() Theme {
 		name:           "Bright",
 		timestamp:      ToANSICode(Gray),
 		header:         ToANSICode(Bold, Gray),
+		source:         ToANSICode(Gray, Bold, Italic),
 		message:        ToANSICode(Bold, White),
 		messageDebug:   ToANSICode(),
 		attrKey:        ToANSICode(BrightCyan),
