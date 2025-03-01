@@ -205,15 +205,15 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 			if lastSpace != -1 {
 				// string immediately followed space, so the
 				// space is hard.
-				fields[lastSpace] = spacerField{hard: true}
+				fields[lastSpace] = spacer{hard: true}
 			}
 			wasString = true
 			lastSpace = -1
-		case spacerField:
+		case spacer:
 			if wasString {
 				// space immedately followed a string, so the space
 				// is hard
-				fields[i] = spacerField{hard: true}
+				fields[i] = spacer{hard: true}
 			}
 			lastSpace = i
 			wasString = false
@@ -307,7 +307,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			// pop a state off the stack
 			stack = stack[:len(stack)-1]
 			continue
-		case spacerField:
+		case spacer:
 			if len(enc.buf) == 0 {
 				// special case, always skip leading space
 				continue
@@ -526,7 +526,7 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 	for i := 0; i < len(format); i++ {
 		if format[i] == ' ' {
 			if !lastWasSpace {
-				fields = append(fields, spacerField{})
+				fields = append(fields, spacer{})
 				lastWasSpace = true
 			}
 			continue
