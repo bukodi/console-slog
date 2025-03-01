@@ -78,6 +78,7 @@ type HandlerOptions struct {
 	//	%a	       attributes
 	//	%[key]h	 header with the given key.
 	//  %{       group open
+	//  %(style){  group open with style - applies the specified Theme style to any strings in the group
 	//  %}       group close
 	//
 	// Headers print the value of the attribute with the given key, and remove that
@@ -104,6 +105,12 @@ type HandlerOptions struct {
 	// will print "INF main main.go:123 > msg" if the either the logger or source attribute is present.  But if the
 	// both attributes are not present, or were elided by ReplaceAttr, then this will print "INF msg".  Groups can
 	// be nested.
+	//
+	// Groups can also be styled using the Theme styles by specifying a style in parentheses after the percent sign:
+	//
+	//	"%l %(source){ %[logger]h %} %m"
+	//
+	// will apply the source style from the Theme to the fixed strings in the group. By default, the Header style is used.
 	//
 	// Whitespace is generally merged to leave a single space between fields.  Leading and trailing whitespace is trimmed.
 	//
@@ -156,9 +163,11 @@ type levelField struct {
 }
 type messageField struct{}
 
-type groupOpen struct{}
 type attrsField struct{}
 
+type groupOpen struct {
+	style string
+}
 type groupClose struct{}
 
 type spacer struct {
@@ -189,7 +198,7 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 		opts.HeaderFormat = defaultHeaderFormat // default format
 	}
 
-	fields, headerFields := parseFormat(opts.HeaderFormat)
+	fields, headerFields := parseFormat(opts.HeaderFormat, opts.Theme)
 
 	// find spocerFields adjacent to string fields and mark them
 	// as hard spaces.  hard spaces should not be skipped, only
@@ -285,6 +294,8 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			stack = append(stack, state)
 			state.groupStart = len(enc.buf)
 			state.printedField = false
+			// Store the style to use for this group
+			state.style = f.style
 			continue
 		case groupClose:
 			if len(stack) == 0 {
@@ -329,7 +340,10 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			state.pendingHardSpace = false
 			state.pendingSpace = false
 			state.anchored = false
-			enc.withColor(&enc.buf, h.opts.Theme.Header(), func() {
+
+			// Use the style specified for the group if available
+			style, _ := getThemeStyleByName(h.opts.Theme, state.style)
+			enc.withColor(&enc.buf, style, func() {
 				enc.buf.AppendString(f)
 			})
 			continue
@@ -399,8 +413,13 @@ type encodeState struct {
 	// whether any field in this group has not been elided.  When a group
 	// closes, if this is false, the entire group will be elided
 	printedField bool
+	// number of fields seen in this group.  If this is 0, then
+	// the group only contains fixed strings, and no fields, and
+	// should not be elided.
+	seenFields int
 
 	anchored, pendingSpace, pendingHardSpace bool
+	style                                    string
 }
 
 // WithAttrs implements slog.Handler.
@@ -510,13 +529,15 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //	"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
 //	"%% %t %l %m"                      // literal "%", timestamp, level, message
 //			"%t %l %s"                         // timestamp, level, source location (e.g., "file.go:123 functionName")
+//		    "%t %l %m %(source){→ %s%}"        // timestamp, level, message, and then source wrapped in a group with a custom string.
+//	                                           // The string in the group will use the "source" style, and the group will be omitted if the source attribute is not present
 //
 // Note that headers will "capture" their matching attribute by default, which means that attribute will not
 // be included in the attributes section of the log line, and will not be matched by subsequent header fields.
 // Use the non-capturing header modifier '+' to disable capturing.  If a header is not capturing, the attribute
 // will still be available for matching subsequent header fields, and will be included in the attributes section
 // of the log line.
-func parseFormat(format string) (fields []any, headerFields []headerField) {
+func parseFormat(format string, theme Theme) (fields []any, headerFields []headerField) {
 	fields = make([]any, 0)
 	headerFields = make([]headerField, 0)
 
@@ -559,11 +580,25 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 		}
 
 		// Check for modifiers before verb
-		var field any
 		var width int
 		var rightAlign bool
 		var capture bool = true // default to capturing for headers
 		var key string
+		var style string
+		if format[i] == '(' {
+			// Find the next ) or end of string
+			end := i + 1
+			for end < len(format) && format[end] != ')' && format[end] != ' ' {
+				end++
+			}
+			if end >= len(format) || format[end] != ')' {
+				fields = append(fields, fmt.Sprintf("%%!%s(MISSING_CLOSING_PARENTHESIS)", format[i:end]))
+				i = end - 1 // Position just before the next character to process
+				continue
+			}
+			style = format[i+1 : end]
+			i = end + 1
+		}
 
 		// Look for [name] modifier
 		if format[i] == '[' {
@@ -605,6 +640,8 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 			break
 		}
 
+		var field any
+
 		// Parse the verb
 		switch format[i] {
 		case 't':
@@ -635,7 +672,11 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 				abbreviated: false,
 			}
 		case '{':
-			field = groupOpen{}
+			if _, ok := getThemeStyleByName(theme, style); !ok {
+				fields = append(fields, fmt.Sprintf("%%!{(%s)(INVALID_STYLE_MODIFIER)", style))
+				continue
+			}
+			field = groupOpen{style: style}
 		case '}':
 			field = groupClose{}
 		case 's':
@@ -651,4 +692,38 @@ func parseFormat(format string) (fields []any, headerFields []headerField) {
 	}
 
 	return fields, headerFields
+}
+
+// Helper function to get style from theme by name
+func getThemeStyleByName(theme Theme, name string) (ANSIMod, bool) {
+	switch name {
+	case "":
+		return theme.Header(), true
+	case "timestamp":
+		return theme.Timestamp(), true
+	case "header":
+		return theme.Header(), true
+	case "source":
+		return theme.Source(), true
+	case "message":
+		return theme.Message(), true
+	case "messageDebug":
+		return theme.MessageDebug(), true
+	case "attrKey":
+		return theme.AttrKey(), true
+	case "attrValue":
+		return theme.AttrValue(), true
+	case "attrValueError":
+		return theme.AttrValueError(), true
+	case "levelError":
+		return theme.LevelError(), true
+	case "levelWarn":
+		return theme.LevelWarn(), true
+	case "levelInfo":
+		return theme.LevelInfo(), true
+	case "levelDebug":
+		return theme.LevelDebug(), true
+	default:
+		return theme.Header(), false // Default to header style, but indicate style was not recognized
+	}
 }

@@ -890,51 +890,110 @@ func TestHandler_CollapseSpaces(t *testing.T) {
 	}
 }
 
+func styled(s string, c ANSIMod) string {
+	if c == "" {
+		return s
+	}
+	return strings.Join([]string{string(c), s, string(ResetMod)}, "")
+}
+
 func TestHandler_HeaderFormat_Groups(t *testing.T) {
+	theme := NewDefaultTheme()
 	tests := []handlerTest{
 		{
 			name:  "group not elided",
-			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m"},
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF [bar] > groups\n",
 		},
 		{
 			name: "group elided",
-			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h]%} > %m", NoColor: true},
 			want: "INF > groups\n",
 		},
 		{
+			name: "group with only fixed strings not elided",
+			opts: HandlerOptions{HeaderFormat: "%l %{[fixed string]%} > %m", NoColor: true},
+			want: "INF [fixed string] > groups\n",
+		},
+		{
 			name: "two headers in group, both elided",
-			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m", NoColor: true},
 			want: "INF > groups\n",
 		},
 		{
 			name:  "two headers in group, one elided",
-			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "INF [bar] > groups\n",
 		},
 		{
 			name:  "two headers in group, neither elided",
-			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m"},
+			opts:  HandlerOptions{HeaderFormat: "%l %{[%[foo]h %[bar]h]%} > %m", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")},
 			want:  "INF [bar baz] > groups\n",
 		},
 		{
 			name: "open group not closed",
-			opts: HandlerOptions{HeaderFormat: "%l %{ > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %{ > %m", NoColor: true},
 			want: "INF > groups\n",
 		},
 		{
 			name: "closed group not opened",
-			opts: HandlerOptions{HeaderFormat: "%l %} > %m"},
+			opts: HandlerOptions{HeaderFormat: "%l %} > %m", NoColor: true},
 			want: "INF > groups\n",
+		},
+		{
+			name:  "styled group",
+			opts:  HandlerOptions{HeaderFormat: "%l %(source){ [%[foo]h] %} > %m"},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want: strings.Join([]string{
+				styled("INF", theme.LevelInfo()), " ",
+				styled("[", theme.Source()),
+				styled("bar", theme.Header()),
+				styled("]", theme.Source()), " ",
+				styled(">", theme.Header()), " ",
+				styled("groups", theme.Message()),
+				"\n"}, ""),
+		},
+		{
+			name:  "nested styled groups",
+			opts:  HandlerOptions{HeaderFormat: "%l %(source){ [%[foo]h] %(message){ [%[bar]h] %} %} > %m"},
+			attrs: []slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")},
+			want: strings.Join([]string{
+				styled("INF", theme.LevelInfo()), " ",
+				styled("[", theme.Source()),
+				styled("bar", theme.Header()),
+				styled("]", theme.Source()), " ",
+				styled("[", theme.Message()),
+				styled("baz", theme.Header()),
+				styled("]", theme.Message()), " ",
+				styled(">", theme.Header()), " ",
+				styled("groups", theme.Message()),
+				"\n"}, ""),
+		},
+		{
+			name:  "invalid style name",
+			opts:  HandlerOptions{HeaderFormat: "%l %(nonexistent){ %[foo]h %} > %m", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF %!{(nonexistent)(INVALID_STYLE_MODIFIER) bar > groups\n",
+		},
+		{
+			name:  "unclosed style modifier",
+			opts:  HandlerOptions{HeaderFormat: "%l %(source{ %[foo]h %} > %m", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF %!(source{(MISSING_CLOSING_PARENTHESIS) bar > groups\n",
+		},
+		{
+			name:  "empty style modifier",
+			opts:  HandlerOptions{HeaderFormat: "%l %(){ %[foo]h %} > %m", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "INF bar > groups\n",
 		},
 	}
 
 	for _, tt := range tests {
 		tt.msg = "groups"
-		tt.opts.NoColor = true
 		tt.runSubtest(t)
 	}
 }
@@ -1317,168 +1376,174 @@ func TestHandler_writerErr(t *testing.T) {
 }
 
 func TestThemes(t *testing.T) {
+	pc, file, line, _ := runtime.Caller(0)
+	cwd, _ := os.Getwd()
+	file, _ = filepath.Rel(cwd, file)
+	sourceField := fmt.Sprintf("%s:%d", file, line)
+
+	testTime := time.Date(2024, 01, 02, 15, 04, 05, 123456789, time.UTC)
+
 	for _, theme := range []Theme{
 		NewDefaultTheme(),
 		NewBrightTheme(),
 	} {
 		t.Run(theme.Name(), func(t *testing.T) {
-			level := slog.LevelInfo
-			rec := slog.Record{}
-			buf := bytes.Buffer{}
-			bufBytes := buf.Bytes()
-			now := time.Now()
-			timeFormat := time.Kitchen
-			index := -1
-			toIndex := -1
-			var lastField []byte
-			h := NewHandler(&buf, &HandlerOptions{
-				AddSource:  true,
-				TimeFormat: timeFormat,
-				Theme:      theme,
-			}).WithAttrs([]slog.Attr{{Key: "pid", Value: slog.IntValue(37556)}})
-			var pcs [1]uintptr
-			runtime.Callers(1, pcs[:])
-
-			checkANSIMod := func(t *testing.T, name string, ansiMod ANSIMod) {
-				t.Run(name, func(t *testing.T) {
-					index = bytes.IndexByte(bufBytes, '\x1b')
-					AssertNotEqual(t, -1, index)
-					toIndex = index + len(ansiMod)
-					AssertEqual(t, ansiMod, ANSIMod(bufBytes[index:toIndex]))
-					bufBytes = bufBytes[toIndex:]
-					index = bytes.IndexByte(bufBytes, '\x1b')
-					AssertNotEqual(t, -1, index)
-					lastField = bufBytes[:index]
-					toIndex = index + len(ResetMod)
-					AssertEqual(t, ResetMod, ANSIMod(bufBytes[index:toIndex]))
-					bufBytes = bufBytes[toIndex:]
-				})
+			tests := []struct {
+				lvl        slog.Level
+				msg        string
+				args       []any
+				wantLvlStr string
+			}{
+				{
+					msg:        "Access",
+					lvl:        slog.LevelDebug - 1,
+					wantLvlStr: "DBG-1",
+					args: []any{
+						"database", "myapp", "host", "localhost:4962",
+					},
+				},
+				{
+					msg:        "Access",
+					lvl:        slog.LevelDebug,
+					wantLvlStr: "DBG",
+					args: []any{
+						"database", "myapp", "host", "localhost:4962",
+					},
+				},
+				{
+					msg:        "Access",
+					lvl:        slog.LevelDebug + 1,
+					wantLvlStr: "DBG+1",
+					args: []any{
+						"database", "myapp", "host", "localhost:4962",
+					},
+				},
+				{
+					msg:        "Starting listener",
+					lvl:        slog.LevelInfo,
+					wantLvlStr: "INF",
+					args: []any{
+						"listen", ":8080",
+					},
+				},
+				{
+					msg:        "Access",
+					lvl:        slog.LevelInfo + 1,
+					wantLvlStr: "INF+1",
+					args: []any{
+						"method", "GET", "path", "/users", "resp_time", time.Millisecond * 10,
+					},
+				},
+				{
+					msg:        "Slow request",
+					lvl:        slog.LevelWarn,
+					wantLvlStr: "WRN",
+					args: []any{
+						"method", "POST", "path", "/posts", "resp_time", time.Second * 532,
+					},
+				},
+				{
+					msg:        "Slow request",
+					lvl:        slog.LevelWarn + 1,
+					wantLvlStr: "WRN+1",
+					args: []any{
+						"method", "POST", "path", "/posts", "resp_time", time.Second * 532,
+					},
+				},
+				{
+					msg:        "Database connection lost",
+					lvl:        slog.LevelError,
+					wantLvlStr: "ERR",
+					args: []any{
+						"database", "myapp", "error", errors.New("connection reset by peer"),
+					},
+				},
+				{
+					msg:        "Database connection lost",
+					lvl:        slog.LevelError + 1,
+					wantLvlStr: "ERR+1",
+					args: []any{
+						"database", "myapp", "error", errors.New("connection reset by peer"),
+					},
+				},
 			}
 
-			checkLog := func(level slog.Level, attrCount int) {
-				t.Run("CheckLog_"+level.String(), func(t *testing.T) {
-					println("log: ", string(buf.Bytes()))
+			for _, tt := range tests {
+				// put together the expected log line
 
-					// Timestamp
-					if theme.Timestamp() != "" {
-						checkANSIMod(t, "Timestamp", theme.Timestamp())
+				var levelStyle ANSIMod
+				switch {
+				case tt.lvl >= slog.LevelError:
+					levelStyle = theme.LevelError()
+				case tt.lvl >= slog.LevelWarn:
+					levelStyle = theme.LevelWarn()
+				case tt.lvl >= slog.LevelInfo:
+					levelStyle = theme.LevelInfo()
+				default:
+					levelStyle = theme.LevelDebug()
 					}
 
-					// Level
-					if theme.Level(level) != "" {
-						checkANSIMod(t, level.String(), theme.Level(level))
+				var messageStyle ANSIMod
+				switch {
+				case tt.lvl >= slog.LevelInfo:
+					messageStyle = theme.Message()
+				default:
+					messageStyle = theme.MessageDebug()
 					}
 
-					// Source
-					if theme.Header() != "" {
-						checkANSIMod(t, "Header", theme.Header())
-						checkANSIMod(t, "Header", theme.Header())
-						// checkANSIMod(t, "AttrKey", theme.AttrKey())
-					}
+				withAttrs := []slog.Attr{{Key: "pid", Value: slog.IntValue(37556)}}
+				attrs := withAttrs
+				var rec slog.Record
+				rec.Add(tt.args...)
+				rec.Attrs(func(a slog.Attr) bool {
+					attrs = append(attrs, a)
+					return true
+				})
 
-					// Message
-					if level >= slog.LevelInfo {
-						if theme.Message() != "" {
-							checkANSIMod(t, "Message", theme.Message())
-						}
+				want := styled(testTime.Format(time.Kitchen), theme.Timestamp()) +
+					" " +
+					styled(tt.wantLvlStr, levelStyle) +
+					" " +
+					styled("http", theme.Header()) +
+					" " +
+					styled(sourceField, theme.Source()) +
+					" " +
+					styled(">", theme.Header()) +
+					" " +
+					styled(tt.msg, messageStyle)
+
+				for _, attr := range attrs {
+					if attr.Key == "error" {
+						want += " " +
+							styled(attr.Key+"=", theme.AttrKey()) +
+							styled(attr.Value.String(), theme.AttrValueError())
 					} else {
-						if theme.MessageDebug() != "" {
-							checkANSIMod(t, "MessageDebug", theme.MessageDebug())
-						}
+						want += " " +
+							styled(attr.Key+"=", theme.AttrKey()) +
+							styled(attr.Value.String(), theme.AttrValue())
 					}
-
-					for i := 0; i < attrCount; i++ {
-						// AttrKey
-						if theme.AttrKey() != "" {
-							checkANSIMod(t, "AttrKey", theme.AttrKey())
 						}
+				want += "\n"
 
-						if string(lastField) == "error=" {
-							// AttrValueError
-							if theme.AttrValueError() != "" {
-								checkANSIMod(t, "AttrValueError", theme.AttrValueError())
-							}
-						} else {
-							// AttrValue
-							if theme.AttrValue() != "" {
-								checkANSIMod(t, "AttrValue", theme.AttrValue())
-							}
-						}
+				ht := handlerTest{
+					opts: HandlerOptions{
+						AddSource:    true,
+						TimeFormat:   time.Kitchen,
+						Theme:        theme,
+						HeaderFormat: "%t %l %{%[logger]h %s >%} %m %a",
+					},
+					attrs: append(withAttrs, slog.String("logger", "http")),
+					pc:    pc,
+					time:  testTime,
+					want:  want,
+					lvl:   tt.lvl,
+					msg:   tt.msg,
+					recFunc: func(r *slog.Record) {
+						r.Add(tt.args...)
+					},
 					}
-				})
+				t.Run(tt.wantLvlStr, ht.run)
 			}
-
-			buf.Reset()
-			level = slog.LevelDebug - 1
-			rec = slog.NewRecord(now, level, "Access", pcs[0])
-			rec.Add("database", "myapp", "host", "localhost:4962")
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 3)
-
-			buf.Reset()
-			level = slog.LevelDebug
-			rec = slog.NewRecord(now, level, "Access", pcs[0])
-			rec.Add("database", "myapp", "host", "localhost:4962")
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 3)
-
-			buf.Reset()
-			level = slog.LevelDebug + 1
-			rec = slog.NewRecord(now, level, "Access", pcs[0])
-			rec.Add("database", "myapp", "host", "localhost:4962")
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 3)
-
-			buf.Reset()
-			level = slog.LevelInfo
-			rec = slog.NewRecord(now, level, "Starting listener", pcs[0])
-			rec.Add("listen", ":8080")
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 2)
-
-			buf.Reset()
-			level = slog.LevelInfo + 1
-			rec = slog.NewRecord(now, level, "Access", pcs[0])
-			rec.Add("method", "GET", "path", "/users", "resp_time", time.Millisecond*10)
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 4)
-
-			buf.Reset()
-			level = slog.LevelWarn
-			rec = slog.NewRecord(now, level, "Slow request", pcs[0])
-			rec.Add("method", "POST", "path", "/posts", "resp_time", time.Second*532)
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 4)
-
-			buf.Reset()
-			level = slog.LevelWarn + 1
-			rec = slog.NewRecord(now, level, "Slow request", pcs[0])
-			rec.Add("method", "POST", "path", "/posts", "resp_time", time.Second*532)
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 4)
-
-			buf.Reset()
-			level = slog.LevelError
-			rec = slog.NewRecord(now, level, "Database connection lost", pcs[0])
-			rec.Add("database", "myapp", "error", errors.New("connection reset by peer"))
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 3)
-
-			buf.Reset()
-			level = slog.LevelError + 1
-			rec = slog.NewRecord(now, level, "Database connection lost", pcs[0])
-			rec.Add("database", "myapp", "error", errors.New("connection reset by peer"))
-			h.Handle(context.Background(), rec)
-			bufBytes = buf.Bytes()
-			checkLog(level, 3)
 		})
 	}
 }
