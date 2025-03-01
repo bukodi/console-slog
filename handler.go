@@ -294,6 +294,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			stack = append(stack, state)
 			state.groupStart = len(enc.buf)
 			state.printedField = false
+			state.seenFields = 0
 			// Store the style to use for this group
 			state.style = f.style
 			continue
@@ -304,10 +305,12 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 				continue
 			}
 
-			if state.printedField {
-				// keep the current state, and just roll back
-				// the group start index to the prior group
-				state.groupStart = stack[len(stack)-1].groupStart
+			if state.printedField || state.seenFields == 0 {
+				// merge the current state with the prior state
+				lastState := stack[len(stack)-1]
+				state.groupStart = lastState.groupStart
+				state.style = lastState.style
+				state.seenFields += lastState.seenFields
 			} else {
 				// no fields were printed in this group, so
 				// rollback the entire group and pop back to
@@ -352,6 +355,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			enc.buf.AppendByte(' ')
 		}
 		l := len(enc.buf)
+		state.seenFields++
 		switch f := f.(type) {
 		case headerField:
 			hf := h.headerFields[headerIdx]
