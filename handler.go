@@ -70,16 +70,16 @@ type HandlerOptions struct {
 	//
 	// The format is a string containing verbs, which are expanded as follows:
 	//
-	//	%t	     timestamp
-	//	%l	     abbreviated level (e.g. "INF")
-	//	%L	     level (e.g. "INFO")
-	//	%m	     message
+	//	%t	       timestamp
+	//	%l	       abbreviated level (e.g. "INF")
+	//	%L	       level (e.g. "INFO")
+	//	%m	       message
 	//	%s	       source (if omitted, source is just handled as an attribute)
 	//	%a	       attributes
-	//	%[key]h	 header with the given key.
-	//  %{       group open
+	//	%[key]h	   header with the given key.
+	//  %{         group open
 	//  %(style){  group open with style - applies the specified Theme style to any strings in the group
-	//  %}       group close
+	//  %}         group close
 	//
 	// Headers print the value of the attribute with the given key, and remove that
 	// attribute from the end of the log line.
@@ -267,11 +267,11 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		src.Line = frame.Line
 
 		if h.sourceAsAttr {
-		// the source attr should not be inside any open groups
-		groups := enc.groups
-		enc.groups = nil
-		enc.encodeAttr("", slog.Any(slog.SourceKey, &src))
-		enc.groups = groups
+			// the source attr should not be inside any open groups
+			groups := enc.groups
+			enc.groups = nil
+			enc.encodeAttr("", slog.Any(slog.SourceKey, &src))
+			enc.groups = groups
 		}
 	}
 
@@ -499,10 +499,10 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //
 // Supported format verbs:
 //
-// %t - timestampField
+//		%t	- timestampField
 //		%h	- headerField, requires the [name] modifier.
 //		      Supports width, right-alignment (-), and non-capturing (+) modifiers.
-// %m - messageField
+//		%m	- messageField
 //		%l	- abbreviated levelField: The log level in abbreviated form (e.g., "INF").
 //		%L	- non-abbreviated levelField: The log level in full form (e.g., "INFO").
 //		%{	- groupOpen
@@ -518,20 +518,20 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //
 // Examples:
 //
-//	"%t %l %m"                         // timestamp, level, message
-//	"%t [%l] %m"                       // timestamp, level in brackets, message
-//	"%t %l:%m"                         // timestamp, level:message
-//	"%t %l %[key]h %m"                 // timestamp, level, header with key "key", message
-//	"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
-//	"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
-//	"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
+//			"%t %l %m"                         // timestamp, level, message
+//			"%t [%l] %m"                       // timestamp, level in brackets, message
+//			"%t %l:%m"                         // timestamp, level:message
+//			"%t %l %[key]h %m"                 // timestamp, level, header with key "key", message
+//			"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
+//			"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
+//			"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
 //			"%t %l %[key]10+h %m"              // timestamp, level, non-captured header with key "key" and width 10, message
 //			"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned non-captured header with key "key" and width 10, message
-//	"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
-//	"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
-//	"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
-//	"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
-//	"%% %t %l %m"                      // literal "%", timestamp, level, message
+//			"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
+//			"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
+//			"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
+//			"prefix %t %l %m suffix"           // "prefix ", timestamp, level, message, and then " suffix"
+//			"%% %t %l %m"                      // literal "%", timestamp, level, message
 //			"%t %l %s"                         // timestamp, level, source location (e.g., "file.go:123 functionName")
 //		    "%t %l %m %(source){→ %s%}"        // timestamp, level, message, and then source wrapped in a group with a custom string.
 //	                                           // The string in the group will use the "source" style, and the group will be omitted if the source attribute is not present
@@ -589,7 +589,11 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 		var capture bool = true // default to capturing for headers
 		var key string
 		var style string
+		var styleSeen, keySeen, widthSeen bool
+
+		// Look for (style) modifier for groupOpen
 		if format[i] == '(' {
+			styleSeen = true
 			// Find the next ) or end of string
 			end := i + 1
 			for end < len(format) && format[end] != ')' && format[end] != ' ' {
@@ -606,14 +610,15 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 
 		// Look for [name] modifier
 		if format[i] == '[' {
+			keySeen = true
 			// Find the next ] or end of string
 			end := i + 1
 			for end < len(format) && format[end] != ']' && format[end] != ' ' {
 				end++
 			}
 			if end >= len(format) || format[end] != ']' {
+				fields = append(fields, fmt.Sprintf("%%!%s(MISSING_CLOSING_BRACKET)", format[i:end]))
 				i = end - 1 // Position just before the next character to process
-				fields = append(fields, "%!(MISSING_CLOSING_BRACKET)")
 				continue
 			}
 			key = format[i+1 : end]
@@ -622,13 +627,14 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 
 		// Look for modifiers
 		for i < len(format) {
-			if format[i] == '-' && key != "" { // '-' only valid for headers
+			if format[i] == '-' {
 				rightAlign = true
 				i++
-			} else if format[i] == '+' && key != "" { // '+' only valid for headers
+			} else if format[i] == '+' {
 				capture = false
 				i++
-			} else if format[i] >= '0' && format[i] <= '9' && key != "" { // width only valid for headers
+			} else if format[i] >= '0' && format[i] <= '9' {
+				widthSeen = true
 				width = 0
 				for i < len(format) && format[i] >= '0' && format[i] <= '9' {
 					width = width*10 + int(format[i]-'0')
@@ -648,6 +654,11 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 
 		// Parse the verb
 		switch format[i] {
+		case ' ':
+			fields = append(fields, "%!(MISSING_VERB)")
+			// backtrack so the space is included in the next field
+			i--
+			continue
 		case 't':
 			field = timestampField{}
 		case 'h':
@@ -666,15 +677,12 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 				hf.key = key[idx+1:]
 			}
 			field = hf
-			headerFields = append(headerFields, hf)
 		case 'm':
 			field = messageField{}
 		case 'l':
 			field = levelField{abbreviated: true}
 		case 'L':
-			field = levelField{
-				abbreviated: false,
-			}
+			field = levelField{abbreviated: false}
 		case '{':
 			if _, ok := getThemeStyleByName(theme, style); !ok {
 				fields = append(fields, fmt.Sprintf("%%!{(%s)(INVALID_STYLE_MODIFIER)", style))
@@ -692,7 +700,26 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 			continue
 		}
 
+		// Check for invalid combinations
+		switch {
+		case styleSeen && format[i] != '{':
+			fields = append(fields, fmt.Sprintf("%%!((INVALID_MODIFIER)%c", format[i]))
+			continue
+		case keySeen && format[i] != 'h':
+			fields = append(fields, fmt.Sprintf("%%![(INVALID_MODIFIER)%c", format[i]))
+			continue
+		case widthSeen && format[i] != 'h':
+			fields = append(fields, fmt.Sprintf("%%!%d(INVALID_MODIFIER)%c", width, format[i]))
+			continue
+		case rightAlign && format[i] != 'h':
+			fields = append(fields, fmt.Sprintf("%%!-(INVALID_MODIFIER)%c", format[i]))
+			continue
+		}
+
 		fields = append(fields, field)
+		if _, ok := field.(headerField); ok {
+			headerFields = append(headerFields, field.(headerField))
+		}
 	}
 
 	return fields, headerFields

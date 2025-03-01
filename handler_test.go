@@ -1243,10 +1243,28 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			want:  "with headers %!(MISSING_VERB) foo=bar\n",
 		},
 		{
-			name:  "invalid modifier",
-			opts:  HandlerOptions{HeaderFormat: "%m %-L", NoColor: true},
+			name:  "invalid right align modifier",
+			opts:  HandlerOptions{HeaderFormat: "%m %-L %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "with headers %!-(INVALID_VERB)L foo=bar\n",
+			want:  "with headers %!-(INVALID_MODIFIER)L foo=bar\n",
+		},
+		{
+			name:  "invalid width modifier",
+			opts:  HandlerOptions{HeaderFormat: "%m %43L %a", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "with headers %!43(INVALID_MODIFIER)L foo=bar\n",
+		},
+		{
+			name:  "invalid style modifier",
+			opts:  HandlerOptions{HeaderFormat: "%m %(source)L %a", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "with headers %!((INVALID_MODIFIER)L foo=bar\n",
+		},
+		{
+			name:  "invalid key modifier",
+			opts:  HandlerOptions{HeaderFormat: "%m %[source]L %a", NoColor: true},
+			attrs: []slog.Attr{slog.String("foo", "bar")},
+			want:  "with headers %![(INVALID_MODIFIER)L foo=bar\n",
 		},
 		{
 			name:  "invalid verb",
@@ -1264,7 +1282,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			name:  "missing closing bracket in header",
 			opts:  HandlerOptions{HeaderFormat: "%m %[fooh > %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "with headers %!(MISSING_CLOSING_BRACKET) > foo=bar\n",
+			want:  "with headers %![fooh(MISSING_CLOSING_BRACKET) > foo=bar\n",
 		},
 		{
 			name: "zero PC",
@@ -1481,7 +1499,7 @@ func TestThemes(t *testing.T) {
 					levelStyle = theme.LevelInfo()
 				default:
 					levelStyle = theme.LevelDebug()
-					}
+				}
 
 				var messageStyle ANSIMod
 				switch {
@@ -1489,7 +1507,7 @@ func TestThemes(t *testing.T) {
 					messageStyle = theme.Message()
 				default:
 					messageStyle = theme.MessageDebug()
-					}
+				}
 
 				withAttrs := []slog.Attr{{Key: "pid", Value: slog.IntValue(37556)}}
 				attrs := withAttrs
@@ -1522,7 +1540,7 @@ func TestThemes(t *testing.T) {
 							styled(attr.Key+"=", theme.AttrKey()) +
 							styled(attr.Value.String(), theme.AttrValue())
 					}
-						}
+				}
 				want += "\n"
 
 				ht := handlerTest{
@@ -1541,7 +1559,7 @@ func TestThemes(t *testing.T) {
 					recFunc: func(r *slog.Record) {
 						r.Add(tt.args...)
 					},
-					}
+				}
 				t.Run(tt.wantLvlStr, ht.run)
 			}
 		})
