@@ -84,19 +84,11 @@ type HandlerOptions struct {
 	// Headers print the value of the attribute with the given key, and remove that
 	// attribute from the end of the log line.
 	//
-	// Headers can be customized with width, alignment, and non-capturing modifiers,
+	// Headers can be customized with width and alignment modifiers,
 	// similar to fmt.Printf verbs. For example:
 	//
 	//	%[key]10h		// left-aligned, width 10
 	//	%[key]-10h		// right-aligned, width 10
-	//	%[key]+h		// non-capturing
-	//	%[key]-10+h		// right-aligned, width 10, non-capturing
-	//
-	// Note that headers will "capture" their matching attribute by default, which means that attribute will not
-	// be included in the attributes section of the log line, and will not be matched by subsequent header fields.
-	// Use the non-capturing header modifier '+' to disable capturing.  If a header is non-capturing, the attribute
-	// will still be available for matching subsequent header fields, and will be included in the attributes section
-	// of the log line.
 	//
 	// Groups will omit their contents if all the fields in that group are omitted.  For example:
 	//
@@ -123,8 +115,6 @@ type HandlerOptions struct {
 	//	"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
 	//	"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
 	//	"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
-	//	"%t %l %[key]10+h %m"              // timestamp, level, captured header with key "key" and width 10, message
-	//	"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned captured header with key "key" and width 10, message
 	//	"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
 	//	"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
 	//	"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
@@ -154,7 +144,6 @@ type headerField struct {
 	key         string
 	width       int
 	rightAlign  bool
-	capture     bool
 	memo        string
 }
 
@@ -501,7 +490,7 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //
 //		%t	- timestampField
 //		%h	- headerField, requires the [name] modifier.
-//		      Supports width, right-alignment (-), and non-capturing (+) modifiers.
+//		      Supports width, right-alignment (-) modifiers.
 //		%m	- messageField
 //		%l	- abbreviated levelField: The log level in abbreviated form (e.g., "INF").
 //		%L	- non-abbreviated levelField: The log level in full form (e.g., "INFO").
@@ -514,7 +503,6 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //	[name] (for %h): The key of the attribute to capture as a header. This modifier is required for the %h verb.
 //	width (for %h): An integer specifying the fixed width of the header. This modifier is optional.
 //	- (for %h): Indicates right-alignment of the header. This modifier is optional.
-//	+ (for %h): Indicates a non-capturing header. This modifier is optional.
 //
 // Examples:
 //
@@ -525,8 +513,6 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //			"%t %l %[key1]h %[key2]h %m"       // timestamp, level, header with key "key1", header with key "key2", message
 //			"%t %l %[key]10h %m"               // timestamp, level, header with key "key" and width 10, message
 //			"%t %l %[key]-10h %m"              // timestamp, level, right-aligned header with key "key" and width 10, message
-//			"%t %l %[key]10+h %m"              // timestamp, level, non-captured header with key "key" and width 10, message
-//			"%t %l %[key]-10+h %m"             // timestamp, level, right-aligned non-captured header with key "key" and width 10, message
 //			"%t %l %L %m"                      // timestamp, abbreviated level, non-abbreviated level, message
 //			"%t %l %L- %m"                     // timestamp, abbreviated level, right-aligned non-abbreviated level, message
 //			"%t %l %m string literal"          // timestamp, level, message, and then " string literal"
@@ -535,12 +521,6 @@ func memoizeHeaders(enc *encoder, headerFields []headerField) []headerField {
 //			"%t %l %s"                         // timestamp, level, source location (e.g., "file.go:123 functionName")
 //		    "%t %l %m %(source){→ %s%}"        // timestamp, level, message, and then source wrapped in a group with a custom string.
 //	                                           // The string in the group will use the "source" style, and the group will be omitted if the source attribute is not present
-//
-// Note that headers will "capture" their matching attribute by default, which means that attribute will not
-// be included in the attributes section of the log line, and will not be matched by subsequent header fields.
-// Use the non-capturing header modifier '+' to disable capturing.  If a header is not capturing, the attribute
-// will still be available for matching subsequent header fields, and will be included in the attributes section
-// of the log line.
 func parseFormat(format string, theme Theme) (fields []any, headerFields []headerField) {
 	fields = make([]any, 0)
 	headerFields = make([]headerField, 0)
@@ -586,7 +566,6 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 		// Check for modifiers before verb
 		var width int
 		var rightAlign bool
-		var capture bool = true // default to capturing for headers
 		var key string
 		var style string
 		var styleSeen, keySeen, widthSeen bool
@@ -630,9 +609,6 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 			if format[i] == '-' {
 				rightAlign = true
 				i++
-			} else if format[i] == '+' {
-				capture = false
-				i++
 			} else if format[i] >= '0' && format[i] <= '9' {
 				widthSeen = true
 				width = 0
@@ -670,7 +646,6 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 				key:        key,
 				width:      width,
 				rightAlign: rightAlign,
-				capture:    capture,
 			}
 			if idx := strings.LastIndexByte(key, '.'); idx > -1 {
 				hf.groupPrefix = key[:idx]

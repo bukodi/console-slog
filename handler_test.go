@@ -1147,24 +1147,6 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			want:  "INF bar > with headers\n", // Second header is ignored since foo was captured by first header
 		},
 		{
-			name:  "non-capturing header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]h %[request_id]+h > %m %a", NoColor: true},
-			attrs: []slog.Attr{slog.String("logger", "app"), slog.String("request_id", "123")},
-			want:  "INF app 123 > with headers request_id=123\n",
-		},
-		{
-			name:  "non-capturing header captured by another header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]h > %m %a", NoColor: true},
-			attrs: []slog.Attr{slog.String("logger", "app")},
-			want:  "INF app app > with headers\n",
-		},
-		{
-			name:  "multiple non-capturing headers matching same attr",
-			opts:  HandlerOptions{HeaderFormat: "%l %[logger]+h %[logger]+h > %m %a", NoColor: true},
-			attrs: []slog.Attr{slog.String("logger", "app")},
-			want:  "INF app app > with headers logger=app\n",
-		},
-		{
 			name:  "repeated timestamp, level and message fields",
 			opts:  HandlerOptions{HeaderFormat: "%t %l %m %t %l %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
@@ -1201,12 +1183,6 @@ func TestHandler_HeaderFormat(t *testing.T) {
 			want:  "INF hello      world > with headers\n",
 		},
 		{
-			name:  "fixed width non-capturing header",
-			opts:  HandlerOptions{HeaderFormat: "%l %[foo]+-10h > %m %a", NoColor: true},
-			attrs: []slog.Attr{slog.String("foo", "bar")},
-			want:  "INF        bar > with headers foo=bar\n",
-		},
-		{
 			name:  "fixed width header missing attr",
 			opts:  HandlerOptions{HeaderFormat: "%l %[missing]10h > %m %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
@@ -1238,7 +1214,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		},
 		{
 			name:  "missing verb with modifiers",
-			opts:  HandlerOptions{HeaderFormat: "%m %[slog]+-4 %a", NoColor: true},
+			opts:  HandlerOptions{HeaderFormat: "%m %[slog]-4 %a", NoColor: true},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want:  "with headers %!(MISSING_VERB) foo=bar\n",
 		},

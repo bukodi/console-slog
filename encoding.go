@@ -285,9 +285,7 @@ func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
 	for i, f := range e.h.headerFields {
 		if f.key == a.Key && f.groupPrefix == groupPrefix {
 			e.headerAttrs[i] = a
-			if f.capture {
-				return
-			}
+			return
 		}
 	}
 
