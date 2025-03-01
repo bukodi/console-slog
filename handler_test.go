@@ -97,7 +97,7 @@ func TestHandler_TimeFormat(t *testing.T) {
 			attrs: tt.attrs,
 			want:  tt.want,
 		}
-		ht.runSubtest(t)
+		t.Run(tt.name, ht.run)
 	}
 }
 
@@ -244,7 +244,7 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 			test.msg = "multiline attrs"
 		}
 		test.opts.NoColor = true
-		test.runSubtest(t)
+		t.Run(test.name, test.run)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestHandler_Groups(t *testing.T) {
 	for _, test := range tests {
 		test.opts.NoColor = true
 		test.msg = test.name
-		test.runSubtest(t)
+		t.Run(test.name, test.run)
 	}
 }
 
@@ -359,7 +359,7 @@ func TestHandler_WithAttr(t *testing.T) {
 		if test.msg == "" {
 			test.msg = test.name
 		}
-		test.runSubtest(t)
+		t.Run(test.name, test.run)
 	}
 
 	t.Run("state isolation", func(t *testing.T) {
@@ -435,7 +435,7 @@ func TestHandler_WithGroup(t *testing.T) {
 		if test.msg == "" {
 			test.msg = test.name
 		}
-		test.runSubtest(t)
+		t.Run(test.name, test.run)
 	}
 
 	t.Run("state isolation", func(t *testing.T) {
@@ -826,7 +826,7 @@ func TestHandler_TruncateSourcePath(t *testing.T) {
 	for _, tt := range tests {
 		tt.opts.NoColor = true
 		tt.want += "\n"
-		tt.runSubtest(t)
+		t.Run(tt.name, tt.run)
 	}
 }
 
@@ -881,12 +881,13 @@ func TestHandler_CollapseSpaces(t *testing.T) {
 	}
 
 	for _, tt := range tests2 {
-		handlerTest{
+		ht := handlerTest{
 			name: tt.desc,
 			msg:  "msg",
 			opts: HandlerOptions{HeaderFormat: tt.format, NoColor: true},
 			want: tt.want + "\n",
-		}.runSubtest(t)
+		}
+		t.Run(ht.name, ht.run)
 	}
 }
 
@@ -994,7 +995,7 @@ func TestHandler_HeaderFormat_Groups(t *testing.T) {
 
 	for _, tt := range tests {
 		tt.msg = "groups"
-		tt.runSubtest(t)
+		t.Run(tt.name, tt.run)
 	}
 }
 
@@ -1315,7 +1316,7 @@ func TestHandler_HeaderFormat(t *testing.T) {
 		tt.pc = pc
 		tt.lvl = slog.LevelInfo
 		tt.time = testTime
-		tt.runSubtest(t)
+		t.Run(tt.name, tt.run)
 	}
 }
 
@@ -1330,13 +1331,6 @@ type handlerTest struct {
 	handlerFunc func(h slog.Handler) slog.Handler
 	recFunc     func(r *slog.Record)
 	want        string
-}
-
-func (ht handlerTest) runSubtest(t *testing.T) {
-	t.Helper()
-	t.Run(ht.name, func(t *testing.T) {
-		ht.run(t)
-	})
 }
 
 func (ht handlerTest) run(t *testing.T) {
