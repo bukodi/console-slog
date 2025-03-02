@@ -180,7 +180,7 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 	if opts.TimeFormat == "" {
 		opts.TimeFormat = time.DateTime
 	}
-	if opts.Theme == nil {
+	if opts.Theme.Name == "" {
 		opts.Theme = NewDefaultTheme()
 	}
 	if opts.HeaderFormat == "" {
@@ -704,32 +704,32 @@ func parseFormat(format string, theme Theme) (fields []any, headerFields []heade
 func getThemeStyleByName(theme Theme, name string) (ANSIMod, bool) {
 	switch name {
 	case "":
-		return theme.Header(), true
+		return theme.Header, true
 	case "timestamp":
-		return theme.Timestamp(), true
+		return theme.Timestamp, true
 	case "header":
-		return theme.Header(), true
+		return theme.Header, true
 	case "source":
-		return theme.Source(), true
+		return theme.Source, true
 	case "message":
-		return theme.Message(), true
+		return theme.Message, true
 	case "messageDebug":
-		return theme.MessageDebug(), true
+		return theme.MessageDebug, true
 	case "attrKey":
-		return theme.AttrKey(), true
+		return theme.AttrKey, true
 	case "attrValue":
-		return theme.AttrValue(), true
+		return theme.AttrValue, true
 	case "attrValueError":
-		return theme.AttrValueError(), true
+		return theme.AttrValueError, true
 	case "levelError":
-		return theme.LevelError(), true
+		return theme.LevelError, true
 	case "levelWarn":
-		return theme.LevelWarn(), true
+		return theme.LevelWarn, true
 	case "levelInfo":
-		return theme.LevelInfo(), true
+		return theme.LevelInfo, true
 	case "levelDebug":
-		return theme.LevelDebug(), true
+		return theme.LevelDebug, true
 	default:
-		return theme.Header(), false // Default to header style, but indicate style was not recognized
+		return theme.Header, false // Default to header style, but indicate style was not recognized
 	}
 }

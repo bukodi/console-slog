@@ -72,7 +72,7 @@ func (e *encoder) encodeTimestamp(tt time.Time) {
 		if attr.Value.Kind() != slog.KindTime {
 			// handle all non-time values by printing them like
 			// an attr value
-			e.writeColoredValue(&e.buf, attr.Value, e.h.opts.Theme.Timestamp())
+			e.writeColoredValue(&e.buf, attr.Value, e.h.opts.Theme.Timestamp)
 			return
 		}
 
@@ -84,15 +84,15 @@ func (e *encoder) encodeTimestamp(tt time.Time) {
 		}
 	}
 
-	e.withColor(&e.buf, e.h.opts.Theme.Timestamp(), func() {
+	e.withColor(&e.buf, e.h.opts.Theme.Timestamp, func() {
 		e.buf.AppendTime(tt, e.h.opts.TimeFormat)
 	})
 }
 
 func (e *encoder) encodeMessage(level slog.Level, msg string) {
-	style := e.h.opts.Theme.Message()
+	style := e.h.opts.Theme.Message
 	if level < slog.LevelInfo {
-		style = e.h.opts.Theme.MessageDebug()
+		style = e.h.opts.Theme.MessageDebug
 	}
 
 	if e.h.opts.ReplaceAttr != nil {
@@ -119,7 +119,7 @@ func (e *encoder) encodeHeader(a slog.Attr, width int, rightAlign bool) {
 		return
 	}
 
-	e.withColor(&e.buf, e.h.opts.Theme.Header(), func() {
+	e.withColor(&e.buf, e.h.opts.Theme.Header, func() {
 		l := len(e.buf)
 		e.writeValue(&e.buf, a.Value)
 		if width <= 0 {
@@ -184,35 +184,35 @@ func (e *encoder) encodeLevel(l slog.Level, abbreviated bool) {
 	var delta int
 	switch {
 	case l >= slog.LevelError:
-		style = e.h.opts.Theme.LevelError()
+		style = e.h.opts.Theme.LevelError
 		str = "ERR"
 		if !abbreviated {
 			str = "ERROR"
 		}
 		delta = int(l - slog.LevelError)
 	case l >= slog.LevelWarn:
-		style = e.h.opts.Theme.LevelWarn()
+		style = e.h.opts.Theme.LevelWarn
 		str = "WRN"
 		if !abbreviated {
 			str = "WARN"
 		}
 		delta = int(l - slog.LevelWarn)
 	case l >= slog.LevelInfo:
-		style = e.h.opts.Theme.LevelInfo()
+		style = e.h.opts.Theme.LevelInfo
 		str = "INF"
 		if !abbreviated {
 			str = "INFO"
 		}
 		delta = int(l - slog.LevelInfo)
 	case l >= slog.LevelDebug:
-		style = e.h.opts.Theme.LevelDebug()
+		style = e.h.opts.Theme.LevelDebug
 		str = "DBG"
 		if !abbreviated {
 			str = "DEBUG"
 		}
 		delta = int(l - slog.LevelDebug)
 	default:
-		style = e.h.opts.Theme.LevelDebug()
+		style = e.h.opts.Theme.LevelDebug
 		str = "DBG"
 		if !abbreviated {
 			str = "DEBUG"
@@ -248,7 +248,7 @@ func (e *encoder) encodeSource(src slog.Source) {
 		v = attr.Value
 	}
 	// Use source style for the value
-	e.writeColoredValue(&e.buf, v, e.h.opts.Theme.Source())
+	e.writeColoredValue(&e.buf, v, e.h.opts.Theme.Source)
 }
 
 func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
@@ -366,7 +366,7 @@ func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
 	value := a.Value
 
 	buf.AppendByte(' ')
-	e.withColor(buf, e.h.opts.Theme.AttrKey(), func() {
+	e.withColor(buf, e.h.opts.Theme.AttrKey, func() {
 		if group != "" {
 			e.attrBuf.AppendString(group)
 			e.attrBuf.AppendByte('.')
@@ -375,10 +375,10 @@ func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
 		e.attrBuf.AppendByte('=')
 	})
 
-	style := e.h.opts.Theme.AttrValue()
+	style := e.h.opts.Theme.AttrValue
 	if value.Kind() == slog.KindAny {
 		if _, ok := value.Any().(error); ok {
-			style = e.h.opts.Theme.AttrValueError()
+			style = e.h.opts.Theme.AttrValueError
 		}
 	}
 	e.writeColoredValue(buf, value, style)

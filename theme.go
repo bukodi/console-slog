@@ -2,7 +2,6 @@ package console
 
 import (
 	"fmt"
-	"log/slog"
 )
 
 type ANSIMod string
@@ -59,97 +58,54 @@ func ToANSICode(modes ...int) ANSIMod {
 	return ANSIMod("\x1b[" + s + "m")
 }
 
-type Theme interface {
-	Name() string
-	Timestamp() ANSIMod
-	Header() ANSIMod
-	Source() ANSIMod
-	Message() ANSIMod
-	MessageDebug() ANSIMod
-	AttrKey() ANSIMod
-	AttrValue() ANSIMod
-	AttrValueError() ANSIMod
-	LevelError() ANSIMod
-	LevelWarn() ANSIMod
-	LevelInfo() ANSIMod
-	LevelDebug() ANSIMod
-	Level(level slog.Level) ANSIMod
-}
-
-type ThemeDef struct {
-	name           string
-	timestamp      ANSIMod
-	header         ANSIMod
-	source         ANSIMod
-	message        ANSIMod
-	messageDebug   ANSIMod
-	attrKey        ANSIMod
-	attrValue      ANSIMod
-	attrValueError ANSIMod
-	levelError     ANSIMod
-	levelWarn      ANSIMod
-	levelInfo      ANSIMod
-	levelDebug     ANSIMod
-}
-
-func (t ThemeDef) Name() string            { return t.name }
-func (t ThemeDef) Timestamp() ANSIMod      { return t.timestamp }
-func (t ThemeDef) Header() ANSIMod         { return t.header }
-func (t ThemeDef) Source() ANSIMod         { return t.source }
-func (t ThemeDef) Message() ANSIMod        { return t.message }
-func (t ThemeDef) MessageDebug() ANSIMod   { return t.messageDebug }
-func (t ThemeDef) AttrKey() ANSIMod        { return t.attrKey }
-func (t ThemeDef) AttrValue() ANSIMod      { return t.attrValue }
-func (t ThemeDef) AttrValueError() ANSIMod { return t.attrValueError }
-func (t ThemeDef) LevelError() ANSIMod     { return t.levelError }
-func (t ThemeDef) LevelWarn() ANSIMod      { return t.levelWarn }
-func (t ThemeDef) LevelInfo() ANSIMod      { return t.levelInfo }
-func (t ThemeDef) LevelDebug() ANSIMod     { return t.levelDebug }
-func (t ThemeDef) Level(level slog.Level) ANSIMod {
-	switch {
-	case level >= slog.LevelError:
-		return t.LevelError()
-	case level >= slog.LevelWarn:
-		return t.LevelWarn()
-	case level >= slog.LevelInfo:
-		return t.LevelInfo()
-	default:
-		return t.LevelDebug()
-	}
+type Theme struct {
+	Name           string
+	Timestamp      ANSIMod
+	Header         ANSIMod
+	Source         ANSIMod
+	Message        ANSIMod
+	MessageDebug   ANSIMod
+	AttrKey        ANSIMod
+	AttrValue      ANSIMod
+	AttrValueError ANSIMod
+	LevelError     ANSIMod
+	LevelWarn      ANSIMod
+	LevelInfo      ANSIMod
+	LevelDebug     ANSIMod
 }
 
 func NewDefaultTheme() Theme {
-	return ThemeDef{
-		name:           "Default",
-		timestamp:      ToANSICode(Faint),
-		header:         ToANSICode(Faint, Bold),
-		source:         ToANSICode(Faint, Italic),
-		message:        ToANSICode(Bold),
-		messageDebug:   ToANSICode(Bold),
-		attrKey:        ToANSICode(Faint, Cyan),
-		attrValue:      ToANSICode(),
-		attrValueError: ToANSICode(Bold, Red),
-		levelError:     ToANSICode(Red),
-		levelWarn:      ToANSICode(Yellow),
-		levelInfo:      ToANSICode(Green),
-		levelDebug:     ToANSICode(),
+	return Theme{
+		Name:           "Default",
+		Timestamp:      ToANSICode(Faint),
+		Header:         ToANSICode(Faint, Bold),
+		Source:         ToANSICode(BrightBlack, Italic),
+		Message:        ToANSICode(Bold),
+		MessageDebug:   ToANSICode(Bold),
+		AttrKey:        ToANSICode(Faint, Green),
+		AttrValue:      ToANSICode(),
+		AttrValueError: ToANSICode(Bold, Red),
+		LevelError:     ToANSICode(Red),
+		LevelWarn:      ToANSICode(Yellow),
+		LevelInfo:      ToANSICode(Cyan),
+		LevelDebug:     ToANSICode(BrightMagenta),
 	}
 }
 
 func NewBrightTheme() Theme {
-	return ThemeDef{
-		name:           "Bright",
-		timestamp:      ToANSICode(Gray),
-		header:         ToANSICode(Bold, Gray),
-		source:         ToANSICode(Gray, Bold, Italic),
-		message:        ToANSICode(Bold, White),
-		messageDebug:   ToANSICode(),
-		attrKey:        ToANSICode(BrightCyan),
-		attrValue:      ToANSICode(),
-		attrValueError: ToANSICode(Bold, BrightRed),
-		levelError:     ToANSICode(BrightRed),
-		levelWarn:      ToANSICode(BrightYellow),
-		levelInfo:      ToANSICode(BrightGreen),
-		levelDebug:     ToANSICode(),
+	return Theme{
+		Name:           "Bright",
+		Timestamp:      ToANSICode(Gray),
+		Header:         ToANSICode(Bold, Gray),
+		Source:         ToANSICode(Gray, Bold, Italic),
+		Message:        ToANSICode(Bold, White),
+		MessageDebug:   ToANSICode(),
+		AttrKey:        ToANSICode(BrightCyan),
+		AttrValue:      ToANSICode(),
+		AttrValueError: ToANSICode(Bold, BrightRed),
+		LevelError:     ToANSICode(BrightRed),
+		LevelWarn:      ToANSICode(BrightYellow),
+		LevelInfo:      ToANSICode(BrightGreen),
+		LevelDebug:     ToANSICode(),
 	}
 }

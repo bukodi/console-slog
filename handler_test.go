@@ -19,7 +19,7 @@ import (
 func TestNewHandler(t *testing.T) {
 	h := NewHandler(nil, nil)
 	AssertEqual(t, time.DateTime, h.opts.TimeFormat)
-	AssertEqual(t, NewDefaultTheme().Name(), h.opts.Theme.Name())
+	AssertEqual(t, NewDefaultTheme().Name, h.opts.Theme.Name)
 	AssertEqual(t, defaultHeaderFormat, h.opts.HeaderFormat)
 }
 
@@ -949,12 +949,12 @@ func TestHandler_HeaderFormat_Groups(t *testing.T) {
 			opts:  HandlerOptions{HeaderFormat: "%l %(source){ [%[foo]h] %} > %m"},
 			attrs: []slog.Attr{slog.String("foo", "bar")},
 			want: strings.Join([]string{
-				styled("INF", theme.LevelInfo()), " ",
-				styled("[", theme.Source()),
-				styled("bar", theme.Header()),
-				styled("]", theme.Source()), " ",
-				styled(">", theme.Header()), " ",
-				styled("groups", theme.Message()),
+				styled("INF", theme.LevelInfo), " ",
+				styled("[", theme.Source),
+				styled("bar", theme.Header),
+				styled("]", theme.Source), " ",
+				styled(">", theme.Header), " ",
+				styled("groups", theme.Message),
 				"\n"}, ""),
 		},
 		{
@@ -962,15 +962,15 @@ func TestHandler_HeaderFormat_Groups(t *testing.T) {
 			opts:  HandlerOptions{HeaderFormat: "%l %(source){ [%[foo]h] %(message){ [%[bar]h] %} %} > %m"},
 			attrs: []slog.Attr{slog.String("foo", "bar"), slog.String("bar", "baz")},
 			want: strings.Join([]string{
-				styled("INF", theme.LevelInfo()), " ",
-				styled("[", theme.Source()),
-				styled("bar", theme.Header()),
-				styled("]", theme.Source()), " ",
-				styled("[", theme.Message()),
-				styled("baz", theme.Header()),
-				styled("]", theme.Message()), " ",
-				styled(">", theme.Header()), " ",
-				styled("groups", theme.Message()),
+				styled("INF", theme.LevelInfo), " ",
+				styled("[", theme.Source),
+				styled("bar", theme.Header),
+				styled("]", theme.Source), " ",
+				styled("[", theme.Message),
+				styled("baz", theme.Header),
+				styled("]", theme.Message), " ",
+				styled(">", theme.Header), " ",
+				styled("groups", theme.Message),
 				"\n"}, ""),
 		},
 		{
@@ -1375,7 +1375,7 @@ func TestThemes(t *testing.T) {
 		NewDefaultTheme(),
 		NewBrightTheme(),
 	} {
-		t.Run(theme.Name(), func(t *testing.T) {
+		t.Run(theme.Name, func(t *testing.T) {
 			tests := []struct {
 				lvl        slog.Level
 				msg        string
@@ -1462,21 +1462,21 @@ func TestThemes(t *testing.T) {
 				var levelStyle ANSIMod
 				switch {
 				case tt.lvl >= slog.LevelError:
-					levelStyle = theme.LevelError()
+					levelStyle = theme.LevelError
 				case tt.lvl >= slog.LevelWarn:
-					levelStyle = theme.LevelWarn()
+					levelStyle = theme.LevelWarn
 				case tt.lvl >= slog.LevelInfo:
-					levelStyle = theme.LevelInfo()
+					levelStyle = theme.LevelInfo
 				default:
-					levelStyle = theme.LevelDebug()
+					levelStyle = theme.LevelDebug
 				}
 
 				var messageStyle ANSIMod
 				switch {
 				case tt.lvl >= slog.LevelInfo:
-					messageStyle = theme.Message()
+					messageStyle = theme.Message
 				default:
-					messageStyle = theme.MessageDebug()
+					messageStyle = theme.MessageDebug
 				}
 
 				withAttrs := []slog.Attr{{Key: "pid", Value: slog.IntValue(37556)}}
@@ -1488,27 +1488,27 @@ func TestThemes(t *testing.T) {
 					return true
 				})
 
-				want := styled(testTime.Format(time.Kitchen), theme.Timestamp()) +
+				want := styled(testTime.Format(time.Kitchen), theme.Timestamp) +
 					" " +
 					styled(tt.wantLvlStr, levelStyle) +
 					" " +
-					styled("http", theme.Header()) +
+					styled("http", theme.Header) +
 					" " +
-					styled(sourceField, theme.Source()) +
+					styled(sourceField, theme.Source) +
 					" " +
-					styled(">", theme.Header()) +
+					styled(">", theme.Header) +
 					" " +
 					styled(tt.msg, messageStyle)
 
 				for _, attr := range attrs {
 					if attr.Key == "error" {
 						want += " " +
-							styled(attr.Key+"=", theme.AttrKey()) +
-							styled(attr.Value.String(), theme.AttrValueError())
+							styled(attr.Key+"=", theme.AttrKey) +
+							styled(attr.Value.String(), theme.AttrValueError)
 					} else {
 						want += " " +
-							styled(attr.Key+"=", theme.AttrKey()) +
-							styled(attr.Value.String(), theme.AttrValue())
+							styled(attr.Key+"=", theme.AttrKey) +
+							styled(attr.Value.String(), theme.AttrValue)
 					}
 				}
 				want += "\n"
