@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ansel1/console-slog/internal"
 )
 
 func TestNewHandler(t *testing.T) {
@@ -180,62 +182,87 @@ func TestHandler_Attr(t *testing.T) {
 }
 
 func TestHandler_AttrsWithNewlines(t *testing.T) {
-	tests := []handlerTest{
+	tests := []struct {
+		handlerTest
+		altWant string
+	}{
 		{
-			name: "single attr",
-			attrs: []slog.Attr{
-				slog.String("foo", "line one\nline two"),
-			},
-			want: "INF multiline attrs foo=line one\nline two\n",
-		},
-		{
-			name: "multiple attrs",
-			attrs: []slog.Attr{
-				slog.String("foo", "line one\nline two"),
-				slog.String("bar", "line three\nline four"),
-			},
-			want: "INF multiline attrs foo=line one\nline two bar=line three\nline four\n",
-		},
-		{
-			name: "sort multiline attrs to end",
-			attrs: []slog.Attr{
-				slog.String("size", "big"),
-				slog.String("foo", "line one\nline two"),
-				slog.String("weight", "heavy"),
-				slog.String("bar", "line three\nline four"),
-				slog.String("color", "red"),
-			},
-			want: "INF multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
-		},
-		{
-			name: "multiline message",
-			msg:  "multiline\nmessage",
-			want: "INF multiline\nmessage\n",
-		},
-		{
-			name: "trim leading and trailing newlines",
-			attrs: []slog.Attr{
-				slog.String("foo", "\nline one\nline two\n"),
-			},
-			want: "INF multiline attrs foo=\nline one\nline two\n",
-		},
-		{
-			name: "multiline attr using WithAttrs",
-			handlerFunc: func(h slog.Handler) slog.Handler {
-				return h.WithAttrs([]slog.Attr{
+			handlerTest: handlerTest{
+				name: "single attr",
+				attrs: []slog.Attr{
 					slog.String("foo", "line one\nline two"),
-				})
+				},
+				want: "INF multiline attrs foo=line one\nline two\n",
 			},
-			attrs: []slog.Attr{slog.String("bar", "baz")},
-			want:  "INF multiline attrs bar=baz foo=line one\nline two\n",
+			altWant: "INF multiline attrs\n=== foo ===\nline one\nline two\n",
 		},
 		{
-			name: "multiline header value",
-			opts: HandlerOptions{NoColor: true, HeaderFormat: "%l %[foo]h > %m"},
-			attrs: []slog.Attr{
-				slog.String("foo", "line one\nline two"),
+			handlerTest: handlerTest{
+				name: "multiple attrs",
+				attrs: []slog.Attr{
+					slog.String("foo", "line one\nline two"),
+					slog.String("bar", "line three\nline four"),
+				},
+				want: "INF multiline attrs foo=line one\nline two bar=line three\nline four\n",
 			},
-			want: "INF line one\nline two > multiline attrs\n",
+			altWant: "INF multiline attrs\n=== foo ===\nline one\nline two\n=== bar ===\nline three\nline four\n",
+		},
+		{
+			handlerTest: handlerTest{
+				name: "sort multiline attrs to end",
+				attrs: []slog.Attr{
+					slog.String("size", "big"),
+					slog.String("foo", "line one\nline two"),
+					slog.String("weight", "heavy"),
+					slog.String("bar", "line three\nline four"),
+					slog.String("color", "red"),
+				},
+				want: "INF multiline attrs size=big weight=heavy color=red foo=line one\nline two bar=line three\nline four\n",
+			},
+			altWant: "INF multiline attrs size=big weight=heavy color=red\n=== foo ===\nline one\nline two\n=== bar ===\nline three\nline four\n",
+		},
+		{
+			handlerTest: handlerTest{
+				name: "multiline message",
+				msg:  "multiline\nmessage",
+				want: "INF multiline\nmessage\n",
+			},
+			altWant: "INF multiline\nmessage\n",
+		},
+		{
+			handlerTest: handlerTest{
+				name: "preserve leading and trailing newlines",
+				attrs: []slog.Attr{
+					slog.String("foo", "\nline one\nline two\n"),
+					slog.String("bar", "line three\nline four\n"),
+				},
+				want: "INF multiline attrs foo=\nline one\nline two\n bar=line three\nline four\n",
+			},
+			altWant: "INF multiline attrs\n=== foo ===\n\nline one\nline two\n\n=== bar ===\nline three\nline four\n\n",
+		},
+		{
+			handlerTest: handlerTest{
+				name: "multiline attr using WithAttrs",
+				handlerFunc: func(h slog.Handler) slog.Handler {
+					return h.WithAttrs([]slog.Attr{
+						slog.String("foo", "line one\nline two"),
+					})
+				},
+				attrs: []slog.Attr{slog.String("bar", "baz")},
+				want:  "INF multiline attrs bar=baz foo=line one\nline two\n",
+			},
+			altWant: "INF multiline attrs bar=baz\n=== foo ===\nline one\nline two\n",
+		},
+		{
+			handlerTest: handlerTest{
+				name: "multiline header value",
+				opts: HandlerOptions{NoColor: true, HeaderFormat: "%l %[foo]h > %m"},
+				attrs: []slog.Attr{
+					slog.String("foo", "line one\nline two"),
+				},
+				want: "INF line one\nline two > multiline attrs\n",
+			},
+			altWant: "INF line one\nline two > multiline attrs\n",
 		},
 	}
 
@@ -244,7 +271,23 @@ func TestHandler_AttrsWithNewlines(t *testing.T) {
 			test.msg = "multiline attrs"
 		}
 		test.opts.NoColor = true
-		t.Run(test.name, test.run)
+		t.Run(test.name+" - old multiline", func(t *testing.T) {
+			oldValue := internal.FeatureFlagNewMultilineAttrs
+			internal.FeatureFlagNewMultilineAttrs = false
+			t.Cleanup(func() {
+				internal.FeatureFlagNewMultilineAttrs = oldValue
+			})
+			test.run(t)
+		})
+		test.want = test.altWant
+		t.Run(test.name+" - new multiline", func(t *testing.T) {
+			oldValue := internal.FeatureFlagNewMultilineAttrs
+			internal.FeatureFlagNewMultilineAttrs = true
+			t.Cleanup(func() {
+				internal.FeatureFlagNewMultilineAttrs = oldValue
+			})
+			test.run(t)
+		})
 	}
 }
 

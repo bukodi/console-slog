@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ansel1/console-slog/internal"
 )
 
 var encoderPool = &sync.Pool{
@@ -290,56 +292,17 @@ func (e *encoder) encodeAttr(groupPrefix string, a slog.Attr) {
 	}
 
 	offset := len(e.attrBuf)
-	e.writeAttr(&e.attrBuf, a, groupPrefix)
+	valOffset := e.writeAttr(a, groupPrefix)
 
 	// check if the last attr written has newlines in it
 	// if so, move it to the trailerBuf
-	lastAttr := e.attrBuf[offset:]
-	if bytes.IndexByte(lastAttr, '\n') >= 0 {
-		// todo: consider splitting the key and the value
-		// components, so the `key=` can be printed on its
-		// own line, and the value will not share any of its
-		// lines with anything else.  Like:
-		//
-		// INF msg key1=val1
-		// key2=
-		// val2 line 1
-		// val2 line 2
-		// key3=
-		// val3 line 1
-		// val3 line 2
-		//
-		// and maybe consider printing the key for these values
-		// differently, like:
-		//
-		// === key2 ===
-		// val2 line1
-		// val2 line2
-		// === key3 ===
-		// val3 line 1
-		// val3 line 2
-		//
-		// Splitting the key and value doesn't work up here in
-		// Handle() though, because we don't know where the term
-		// control characters are.  Would need to push this
-		// multiline handling deeper into encoder, or pass
-		// offsets back up from writeAttr()
-		//
-		// if k, v, ok := bytes.Cut(lastAttr, []byte("=")); ok {
-		// trailerBuf.AppendString("=== ")
-		// trailerBuf.Append(k[1:])
-		// trailerBuf.AppendString(" ===\n")
-		// trailerBuf.AppendByte('=')
-		// trailerBuf.AppendByte('\n')
-		// trailerBuf.AppendString("---------------------\n")
-		// trailerBuf.Append(v)
-		// trailerBuf.AppendString("\n---------------------\n")
-		// trailerBuf.AppendByte('\n')
-		// } else {
-		// trailerBuf.Append(lastAttr[1:])
-		// trailerBuf.AppendByte('\n')
-		// }
-		e.multilineAttrBuf.Append(lastAttr)
+	if bytes.IndexByte(e.attrBuf[offset:], '\n') >= 0 {
+		if internal.FeatureFlagNewMultilineAttrs {
+			val := e.attrBuf[valOffset:]
+			e.writeMultilineAttr(a.Key, groupPrefix, val)
+		} else {
+			e.multilineAttrBuf.Append(e.attrBuf[offset:])
+		}
 
 		// rewind the middle buffer
 		e.attrBuf = e.attrBuf[:offset]
@@ -362,11 +325,16 @@ func (e *encoder) writeColoredString(w *buffer, s string, c ANSIMod) {
 	})
 }
 
-func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
+// writeAttr encodes the attr to the attrBuf.  The group will be prepended
+// to the key, joined with a '.'
+//
+// returns the offset where the value starts, which may be used by the
+// caller to split the key and value
+func (e *encoder) writeAttr(a slog.Attr, group string) int {
 	value := a.Value
 
-	buf.AppendByte(' ')
-	e.withColor(buf, e.h.opts.Theme.AttrKey, func() {
+	e.attrBuf.AppendByte(' ')
+	e.withColor(&e.attrBuf, e.h.opts.Theme.AttrKey, func() {
 		if group != "" {
 			e.attrBuf.AppendString(group)
 			e.attrBuf.AppendByte('.')
@@ -381,7 +349,23 @@ func (e *encoder) writeAttr(buf *buffer, a slog.Attr, group string) {
 			style = e.h.opts.Theme.AttrValueError
 		}
 	}
-	e.writeColoredValue(buf, value, style)
+	valOffset := len(e.attrBuf)
+	e.writeColoredValue(&e.attrBuf, value, style)
+	return valOffset
+}
+
+func (e *encoder) writeMultilineAttr(key, group string, value []byte) {
+	e.multilineAttrBuf.AppendByte('\n')
+	e.withColor(&e.multilineAttrBuf, e.h.opts.Theme.AttrKey, func() {
+		e.multilineAttrBuf.AppendString("=== ")
+		if group != "" {
+			e.multilineAttrBuf.AppendString(group)
+			e.multilineAttrBuf.AppendByte('.')
+		}
+		e.multilineAttrBuf.AppendString(key)
+		e.multilineAttrBuf.AppendString(" ===\n")
+	})
+	e.multilineAttrBuf.Append(value)
 }
 
 func (e *encoder) writeValue(buf *buffer, value slog.Value) {

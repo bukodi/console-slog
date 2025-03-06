@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ansel1/console-slog/internal"
 )
 
 var cwd string
@@ -277,6 +279,7 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	// use a fixed size stack to avoid allocations, 3 deep nested groups should be enough for most cases
 	stackArr := [3]encodeState{}
 	stack := stackArr[:0]
+	var attrsFieldSeen bool
 	for _, f := range h.fields {
 		switch f := f.(type) {
 		case groupOpen:
@@ -364,11 +367,14 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			// but leave a space between attrBuf and multilineAttrBuf
 			if len(enc.attrBuf) > 0 {
 				enc.attrBuf = bytes.TrimSpace(enc.attrBuf)
-			} else if len(enc.multilineAttrBuf) > 0 {
+			} else if len(enc.multilineAttrBuf) > 0 && !internal.FeatureFlagNewMultilineAttrs {
 				enc.multilineAttrBuf = bytes.TrimSpace(enc.multilineAttrBuf)
 			}
+			attrsFieldSeen = true
 			enc.buf.Append(enc.attrBuf)
-			enc.buf.Append(enc.multilineAttrBuf)
+			if !internal.FeatureFlagNewMultilineAttrs {
+				enc.buf.Append(enc.multilineAttrBuf)
+			}
 		case sourceField:
 			enc.encodeSource(src)
 		case timestampField:
@@ -386,6 +392,10 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 			// leave state.spacePending as is for next
 			// field to handle
 		}
+	}
+
+	if internal.FeatureFlagNewMultilineAttrs && attrsFieldSeen && len(enc.multilineAttrBuf) > 0 {
+		enc.buf.Append(enc.multilineAttrBuf)
 	}
 
 	enc.buf.AppendByte('\n')
