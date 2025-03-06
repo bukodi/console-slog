@@ -142,9 +142,9 @@ type formatterError struct {
 
 func (e *formatterError) Format(f fmt.State, verb rune) {
 	if verb == 'v' && f.Flag('+') {
-		io.WriteString(f, "formatted ")
+		_, _ = io.WriteString(f, "formatted ")
 	}
-	io.WriteString(f, e.Error())
+	_, _ = io.WriteString(f, e.Error())
 }
 
 func TestHandler_Attr(t *testing.T) {
