@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ansel1/console-slog/internal"
@@ -137,6 +138,7 @@ type Handler struct {
 	fields                    []any
 	headerFields              []headerField
 	sourceAsAttr              bool
+	mu                        *sync.Mutex
 }
 
 type timestampField struct{}
@@ -238,6 +240,7 @@ func NewHandler(out io.Writer, opts *HandlerOptions) *Handler {
 		fields:       fields,
 		headerFields: headerFields,
 		sourceAsAttr: sourceAsAttr,
+		mu:           &sync.Mutex{},
 	}
 }
 
@@ -400,6 +403,8 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 
 	enc.buf.AppendByte('\n')
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if _, err := enc.buf.WriteTo(h.out); err != nil {
 		return err
 	}
@@ -417,7 +422,7 @@ type encodeState struct {
 	// closes, if this is false, the entire group will be elided
 	printedField bool
 	// number of fields seen in this group.  If this is 0, then
-	// the group only contains fixed strings, and no fields, and
+	// the group only contains fixed strings, and no fields, adn
 	// should not be elided.
 	seenFields int
 
@@ -458,6 +463,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		fields:           h.fields,
 		headerFields:     headerFields,
 		sourceAsAttr:     h.sourceAsAttr,
+		mu:               h.mu,
 	}
 }
 
@@ -477,6 +483,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		fields:       h.fields,
 		headerFields: h.headerFields,
 		sourceAsAttr: h.sourceAsAttr,
+		mu:           h.mu,
 	}
 }
 
