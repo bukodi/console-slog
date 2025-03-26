@@ -1,12 +1,12 @@
 # console-slog
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/phsym/console-slog.svg)](https://pkg.go.dev/github.com/phsym/console-slog) [![license](http://img.shields.io/badge/license-MIT-red.svg?style=flat)](https://raw.githubusercontent.com/phsym/console-slog/master/LICENSE) [![Build](https://github.com/phsym/console-slog/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/phsym/slog-console/actions/workflows/go.yml) [![codecov](https://codecov.io/gh/phsym/console-slog/graph/badge.svg?token=ZIJT9L79QP)](https://codecov.io/gh/phsym/console-slog) [![Go Report Card](https://goreportcard.com/badge/github.com/phsym/console-slog)](https://goreportcard.com/report/github.com/phsym/console-slog)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ansel1/console-slog.svg)](https://pkg.go.dev/github.com/ansel1/console-slog) [![license](http://img.shields.io/badge/license-MIT-red.svg?style=flat)](https://raw.githubusercontent.com/ansel1/console-slog/master/LICENSE) [![Build](https://github.com/ansel1/console-slog/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/ansel1/slog-console/actions/workflows/go.yml) [![codecov](https://codecov.io/gh/ansel1/console-slog/graph/badge.svg?token=ZIJT9L79QP)](https://codecov.io/gh/ansel1/console-slog) [![Go Report Card](https://goreportcard.com/badge/github.com/ansel1/console-slog)](https://goreportcard.com/report/github.com/ansel1/console-slog)
 
 A handler for slog that prints colorized logs, similar to zerolog's console writer output without sacrificing performances.
 
 ## Installation
 ```bash
-go get github.com/phsym/console-slog@latest
+go get github.com/ansel1/console-slog@latest
 ```
 
 ## Example
@@ -18,7 +18,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/phsym/console-slog"
+	"github.com/ansel1/console-slog"
 )
 
 func main() {
@@ -50,26 +50,9 @@ console.NewHandler(os.Stderr, &console.HandlerOptions{Level: slog.LevelDebug, Ad
 ## Performances
 See [benchmark file](./bench_test.go) for details.
 
-The handler itself performs quite well compared to std-lib's handlers. It does no allocation:
-```
-goos: linux
-goarch: amd64
-pkg: github.com/phsym/console-slog
-cpu: Intel(R) Core(TM) i5-6300U CPU @ 2.40GHz
-BenchmarkHandlers/dummy-4               128931026            8.732 ns/op               0 B/op          0 allocs/op
-BenchmarkHandlers/console-4               849837              1294 ns/op               0 B/op          0 allocs/op
-BenchmarkHandlers/std-text-4              542583              2097 ns/op               4 B/op          2 allocs/op
-BenchmarkHandlers/std-json-4              583784              1911 ns/op             120 B/op          3 allocs/op
-```
+The handler itself performs quite well compared to std-lib's handlers. It does no allocation.  It is generally faster
+then slog.TextHandler, and a little slower than slog.JSONHandler.
 
-However, the go 1.21.0 `slog.Logger` adds some overhead:
-```
-goos: linux
-goarch: amd64
-pkg: github.com/phsym/console-slog
-cpu: Intel(R) Core(TM) i5-6300U CPU @ 2.40GHz
-BenchmarkLoggers/dummy-4                 1239873             893.2 ns/op             128 B/op          1 allocs/op
-BenchmarkLoggers/console-4                483354              2338 ns/op             128 B/op          1 allocs/op
-BenchmarkLoggers/std-text-4               368828              3141 ns/op             132 B/op          3 allocs/op
-BenchmarkLoggers/std-json-4               393322              2909 ns/op             248 B/op          4 allocs/op
-```
+## Credit
+
+This is a forked and heavily modified variant of github.com/phsym/console-slog.
