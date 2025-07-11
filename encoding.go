@@ -415,6 +415,7 @@ func (e *encoder) writeColoredValue(buf *buffer, value slog.Value, style ANSIMod
 }
 
 func trimmedPath(path string, cwd string, truncate int) string {
+	path = filepath.ToSlash(path)
 	// if the file path appears to be under the current
 	// working directory, then we're probably running
 	// in a dev environment, and we can show the
@@ -422,7 +423,7 @@ func trimmedPath(path string, cwd string, truncate int) string {
 	// working directory
 	if cwd != "" && strings.HasPrefix(path, cwd) {
 		if ff, err := filepath.Rel(cwd, path); err == nil {
-			path = ff
+			path = filepath.ToSlash(ff)
 		}
 	}
 
